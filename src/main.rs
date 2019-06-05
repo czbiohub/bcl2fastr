@@ -1,5 +1,9 @@
 fn main() {
-    println!("Hello, world!");
+
+}
+
+fn version_info() -> &'static str {
+    "bcl2fastr beta version"
 }
 
 
@@ -10,7 +14,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_example() {
-        assert_eq!(main(), "Hello ");
+    fn test_version_info() {
+        assert_eq!(version_info(), "bcl2fastr beta version");
     }
 }
