@@ -1,8 +1,8 @@
 FROM rust:1.31
 
-WORKDIR /usr/src/app
+RUN useradd -ms /bin/bash rustacean
+WORKDIR /home/rustacean
 COPY . .
+RUN chown -R rustacean:rustacean /home/rustacean
 
-RUN cargo install --path .
-
-CMD ["cargo", "run"]
+USER rustacean
