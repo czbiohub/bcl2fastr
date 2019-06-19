@@ -3,13 +3,14 @@ extern crate serde_derive;
 extern crate serde;
 extern crate serde_xml_rs;
 
-mod structs;
 mod parser;
 
 
 fn main() {
-    let filename = "/usr/src/bcl2fastr/src/test_data/test_runinfo.xml".to_string();
-    parser::main(filename);    
+    let filename_info = "/usr/src/bcl2fastr/src/test_data/RunInfo.xml".to_string();
+    let filename_params = "/usr/src/bcl2fastr/src/test_data/test_runparams.xml".to_string();
+    parser::parse_run_info(filename_info);
+    parser::parse_run_params(filename_params);
 }
 
 
