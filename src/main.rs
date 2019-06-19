@@ -8,7 +8,7 @@ mod parser;
 
 
 fn main() {
-    let filename = "/mnt/bcl2fastr_test_data/190414_A00111_0296_AHJCWWDSXX/test_runinfo.xml".to_string();
+    let filename = "/usr/src/bcl2fastr/src/test_data/test_runinfo.xml".to_string();
     parser::main(filename);    
 }
 

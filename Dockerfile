@@ -1,8 +1,8 @@
 FROM rust:1.31
 
-RUN useradd -ms /bin/bash rustacean
-WORKDIR /home/rustacean
+WORKDIR /usr/src/bcl2fastr
 COPY . .
-RUN chown -R rustacean:rustacean /home/rustacean
 
-USER rustacean
+RUN cargo install --path .
+
+CMD ["cargo", "run"]
