@@ -5,8 +5,6 @@ authors = ["phoenixAja <phoenix@phoenixlogan.net>"]
 edition = "2018"
 
 [dependencies]
-quick-xml = "0.14.0"
-minidom = "*"
 serde = "1.0"
 serde_derive = "1.0"
 serde-xml-rs = "*"
