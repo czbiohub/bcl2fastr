@@ -2,7 +2,7 @@ use std::fs;
 use serde_xml_rs::from_reader;
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct Read {
     //run_path: String, // path to specific run dir
     #[serde(rename = "Number", default)]
@@ -14,7 +14,7 @@ pub struct Read {
 }
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct FlowcellLayout {
     #[serde(rename = "LaneCount", default)]
     pub lane_count : u32,
@@ -31,7 +31,7 @@ pub struct FlowcellLayout {
 }
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct TileSet {
     #[serde(rename = "TileNamingconvention", default)]
     pub tile_naming_convention : String,
@@ -40,21 +40,21 @@ pub struct TileSet {
 }
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct Tiles {
     #[serde(rename = "Tile", default)]
     pub tile : Vec<String>,
 }
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct Reads {
     #[serde(rename = "Read", default)]
     pub read : Vec<Read>,
 }
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct Run {
     //run_path: String, // path to specific run dir
     #[serde(rename = "Id", default)]
@@ -74,7 +74,7 @@ pub struct Run {
 }
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct RunInfo {
     #[serde(rename = "Version", default)]
     pub version : u32,
@@ -83,7 +83,7 @@ pub struct RunInfo {
 }
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct RunParams {
     #[serde(rename = "ReadType", default)]
     pub read_type : String, // if paired-end read (determines if you double cycle numbers)
@@ -96,16 +96,6 @@ pub struct RunParams {
     #[serde(rename = "IndexRead2NumberOfCycles", default)]
     pub index2_cycles : u64,
 }
-
-// impl PartialEq for RunParams {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.read_type == other.read_type;
-//         self.read1_cycles == other.read1_cycles;
-//         self.read2_cycles == other.read2_cycles;
-//         self.index1_cycles == other.index1_cycles;
-//         self.index2_cycles == other.index2_cycles;
-//     }
-// }
 
 
 pub fn parse_run_params(run_params_path: String) -> RunParams {
@@ -137,45 +127,45 @@ mod tests {
         let expected_runinfo =
             RunInfo {
                 version: 5,
-                runs: [
+                runs: vec![
                     Run {
-                        id: "190414_A00111_0296_AHJCWWDSXX",
+                        id: "190414_A00111_0296_AHJCWWDSXX".to_string(),
                         number: 296,
-                        flowcell: "HJCWWDSXX",
-                        instrument: "A00111",
-                        date: "4/14/2019 1:17:20 PM",
-                        reads: [
+                        flowcell: "HJCWWDSXX".to_string(),
+                        instrument: "A00111".to_string(),
+                        date: "4/14/2019 1:17:20 PM".to_string(),
+                        reads: vec![
                             Reads {
-                                read: [
+                                read: vec![
                                     Read {
                                         number: 1,
                                         num_cycles: 150,
-                                        is_indexed_read: "N"
+                                        is_indexed_read: "N".to_string()
                                     },
                                     Read {
                                         number: 2,
                                         num_cycles: 8,
-                                        is_indexed_read: "Y"
+                                        is_indexed_read: "Y".to_string()
                                     }
                                 ]
                             }
                         ],
-                        flow_cell_layout: [
+                        flow_cell_layout: vec![
                             FlowcellLayout {
                                 lane_count: 4,
                                 surface_count: 2,
                                 swath_count: 6,
                                 tile_count: 78,
                                 flowcell_side: 1,
-                                tile_set: [
+                                tile_set: vec![
                                     TileSet {
-                                        tile_naming_convention: "",
-                                        tiles: [
+                                        tile_naming_convention: "".to_string(),
+                                        tiles: vec![
                                             Tiles {
-                                                tile: [
-                                                    "1_2101",
-                                                    "1_2102",
-                                                    "1_2103"
+                                                tile: vec![
+                                                    "1_2101".to_string(),
+                                                    "1_2102".to_string(),
+                                                    "1_2103".to_string()
                                                 ]
                                             }
                                         ]
@@ -186,9 +176,7 @@ mod tests {
                     }
                 ]
             };
-        println!("{:?}", actual_info);
-        // uses PartialEq implementation for RunParams to check equality
-        assert_eq!(actual_runinfo, expected_info)        
+        assert_eq!(actual_runinfo, expected_runinfo)        
 
     }
 
@@ -204,8 +192,6 @@ mod tests {
                 index1_cycles: 8,
                 index2_cycles: 8
             };
-        println!("{:?}", actual_runparams);
-        // uses PartialEq implementation for RunParams to check equality
         assert_eq!(actual_runparams, expected_runparams)
     }
 }
