@@ -122,7 +122,7 @@ mod tests {
 
     #[test]
     fn test_runinfo() {
-        let filename_info = "/usr/src/bcl2fastr/src/test_data/RunInfo.xml".to_string();
+        let filename_info = "src/test_data/RunInfo.xml".to_string();
         let actual_runinfo : RunInfo = parse_run_info(filename_info);
         let expected_runinfo =
             RunInfo {
@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_runparams() {
-        let filename_params = "/usr/src/bcl2fastr/src/test_data/test_runparams.xml".to_string();
+        let filename_params = "src/test_data/test_runparams.xml".to_string();
         let actual_runparams : RunParams = parse_run_params(filename_params);
         let expected_runparams =
             RunParams {

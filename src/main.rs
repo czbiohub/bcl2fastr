@@ -7,8 +7,8 @@ mod parser;
 
 
 fn main() {
-    let filename_info = "/usr/src/bcl2fastr/src/test_data/RunInfo.xml".to_string();
-    let filename_params = "/usr/src/bcl2fastr/src/test_data/test_runparams.xml".to_string();
+    let filename_info = "src/test_data/RunInfo.xml".to_string();
+    let filename_params = "src/test_data/test_runparams.xml".to_string();
     parser::parse_run_info(filename_info);
     parser::parse_run_params(filename_params);
 }
