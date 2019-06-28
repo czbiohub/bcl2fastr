@@ -35,10 +35,33 @@ impl CBCLHeader {
 }
 
 
-pub fn cbcl_decoder(cbcl_path: String) {
-
+pub fn cbcl_decoder(cbcl_path: String) -> CBCLHeader{
     let f = File::open(cbcl_path).unwrap();
-    let cbcl = CBCLHeader::from_reader(f);
+    let cbcl = CBCLHeader::from_reader(f).unwrap();
     println!("{:#?}", cbcl);
-
+    return cbcl
 }
+
+
+#[cfg(test)]
+mod tests {
+    
+    use super::*;
+    
+    #[test]
+    fn test_cbclheader() {
+        let test_file = "src/test_data/L001_1_cbcl_header.cbcl".to_string();
+        let actual_cbclheader : CBCLHeader = cbcl_decoder(test_file);
+        let expected_cbclheader =
+            CBCLHeader {
+                version: 1,
+                header_size: 7537,
+                bits_per_basecall: 0,
+                bits_per_qscore: 514,
+                number_of_bins: 4
+            };
+        assert_eq!(actual_cbclheader, expected_cbclheader)
+    }
+}
+
+
