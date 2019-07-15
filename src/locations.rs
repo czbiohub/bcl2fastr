@@ -15,7 +15,7 @@ impl Locs {
         let _ = rdr.read_u64::<LittleEndian>()?;
         let num_clusters = rdr.read_u32::<LittleEndian>()?;
         let mut locs = Vec::new();
-        for _c in 0..7 { // 7 is a placeholder for where "num_clusters" should be in every version except for the test version
+        for _c in 0..num_clusters {
             let x = rdr.read_f32::<LittleEndian>()?;
             let y = rdr.read_f32::<LittleEndian>()?;
             locs.push(vec![x, y]);
@@ -66,14 +66,6 @@ mod tests {
                     ],
                     vec![
                         7.232394,
-                        0.0,
-                    ],
-                    vec![
-                        9.040493,
-                        0.0,
-                    ],
-                    vec![
-                        10.848592,
                         0.0,
                     ],
                 ],
