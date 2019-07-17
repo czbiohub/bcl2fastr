@@ -13,6 +13,7 @@ pub struct Lane {
     pub base_matrix : Vec<Vec<u8>>, // (0 - 4)
     pub qscore_matrix : Vec<Vec<u8>>, // (0 - 4)
     pub reads : Vec<Read>, // vec of Read structs built using the base_matrix and qscore_matrix as inputs
+    pub indices : Vec<Index>, // keep track of the indices when you first read it? could be helpful?
 
 }
 
@@ -45,6 +46,8 @@ impl Lane {
 
     }
 
+    // remember to check if you have an odd # of reads that pass filter (in that case the last half
+    // byte of the file doesn't have any real base/qscore info)
     fn apply_filters(filters, base_matrix, q_score_matrix) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
 
     }
