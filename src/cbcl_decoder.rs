@@ -2,6 +2,7 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use std::{
     fs::File,
     io::{self, Read},
+    path::Path,
 };
 
 
@@ -62,7 +63,7 @@ impl CBCLHeader {
 }
 
 
-pub fn cbcl_decoder(cbcl_path: String) -> CBCLHeader{
+pub fn cbcl_decoder(cbcl_path: &Path) -> CBCLHeader{
     let f = File::open(cbcl_path).unwrap();
     let cbcl = CBCLHeader::from_reader(f).unwrap();
     println!("{:#?}", cbcl);
@@ -77,7 +78,7 @@ mod tests {
 
     #[test]
     fn test_cbclheader() {
-        let test_file = "src/test_data/test_cbcl_header.cbcl".to_string();
+        let test_file = Path::new("src/test_data/test_cbcl_header.cbcl");
         let actual_cbclheader : CBCLHeader = cbcl_decoder(test_file);
         let expected_cbclheader =
             CBCLHeader {

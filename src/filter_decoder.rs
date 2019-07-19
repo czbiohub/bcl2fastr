@@ -2,6 +2,7 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use std::{
     fs::File,
     io::{self, Read},
+    path::Path,
 };
 
 
@@ -26,7 +27,7 @@ impl Filter {
     }
 }
 
-pub fn filter_decoder(filter_path: String) -> Filter {
+pub fn filter_decoder(filter_path: &Path) -> Filter {
     let f = File::open(filter_path).unwrap();
     let filter = Filter::from_reader(f).unwrap();
     println!("{:#?}", filter);
@@ -41,7 +42,7 @@ mod tests {
 
     #[test]
     fn test_filter() {
-        let test_file = "src/test_data/test_filter.filter".to_string();
+        let test_file = Path::new("src/test_data/test_filter.filter");
         let actual_filter : Filter = filter_decoder(test_file);
         let expected_filter =
             Filter {

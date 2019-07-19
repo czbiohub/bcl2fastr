@@ -1,4 +1,7 @@
-use std::fs;
+use std::{
+    fs,
+    path::Path,
+};
 use serde_xml_rs::from_reader;
 
 
@@ -59,7 +62,7 @@ pub struct Run {
     //run_path: String, // path to specific run dir
     #[serde(rename = "Id", default)]
     pub id : String, // parsed from run info, outputed in fastq
-    #[serde(rename = "Number", default)]    
+    #[serde(rename = "Number", default)]
     pub number : u64,
     #[serde(rename = "Flowcell", default)]
     pub flowcell : String,
@@ -98,16 +101,16 @@ pub struct RunParams {
 }
 
 
-pub fn parse_run_params(run_params_path: String) -> RunParams {
-    println!("reading file {}", run_params_path);
+pub fn parse_run_params(run_params_path: &Path) -> RunParams {
+    println!("reading file {}", run_params_path.display());
     let params_xml = fs::read_to_string(run_params_path).expect("error reading the file");
     let runparams : RunParams = from_reader(params_xml.as_bytes()).unwrap();
     println!("{:#?}", runparams);
     return runparams
 }
 
-pub fn parse_run_info(run_info_path: String) -> RunInfo {
-    println!("reading file {}", run_info_path);
+pub fn parse_run_info(run_info_path: &Path) -> RunInfo {
+    println!("reading file {}", run_info_path.display());
     let run_xml = fs::read_to_string(run_info_path).expect("error reading the file");
     let runinfo : RunInfo = from_reader(run_xml.as_bytes()).unwrap();
     println!("{:#?}", runinfo);
@@ -122,7 +125,7 @@ mod tests {
 
     #[test]
     fn test_runinfo() {
-        let filename_info = "src/test_data/RunInfo.xml".to_string();
+        let filename_info = Path::new("src/test_data/RunInfo.xml");
         let actual_runinfo : RunInfo = parse_run_info(filename_info);
         let expected_runinfo =
             RunInfo {
@@ -176,13 +179,13 @@ mod tests {
                     }
                 ]
             };
-        assert_eq!(actual_runinfo, expected_runinfo)        
+        assert_eq!(actual_runinfo, expected_runinfo)
 
     }
 
     #[test]
     fn test_runparams() {
-        let filename_params = "src/test_data/test_runparams.xml".to_string();
+        let filename_params = Path::new("src/test_data/test_runparams.xml");
         let actual_runparams : RunParams = parse_run_params(filename_params);
         let expected_runparams =
             RunParams {
