@@ -12,8 +12,10 @@ mod locations;
 
 pub struct Lane {
     pub cbcl_paths : Vec<String>, // paths to each cbcl file
-    pub headers : Vec<CBCLHeader>, // use cbcl_fils to read in headers
-    pub tiles : Vec<i32>, // tile numbers (all of the tiles in this lane, can be read from any cbcl file (should be same))
+    pub headers : Vec<CBCLHeader>, // use cbcl_files to read in headers
+    pub tiles : Vec<Vec<Tile>>, // tiles (holds all of the bases from each of the tiles), read in by cbcl_file
+    // Tile struct holds base_matrix and qscore_matrix from each tile (sorted by Lane and Lane-part)
+    // make sure to also store the tile number inside this struct
     pub filter_paths : Vec<String>, // paths to each filter_file
     pub filters : HashMap<i32, Filter>, // [tile_number, Filter object] read filters using filter_decoder
     pub base_matrix : Vec<Vec<u8>>, // (0 - 4)
@@ -28,32 +30,40 @@ impl Lane {
     // run_id ex: 190414_A00111_0296_AHJCWWDSXX
 
     // reads in paths from the lane_path dir and sorts into subdirectories (cbcl) or files (filters)
-    fn read_subpaths(lane_path : String) -> (Vec<String>, Vec<String>) {
-        let path = Path::new(lane_path);
+    fn read_subpaths(lane_path : &Path) -> (Vec<Path>, Vec<Path>) {
         let cbcl_paths = Vec::new();
         let filter_paths = Vec::new();
-        for entry in fs::read_dir(path) {
+        for entry in fs::read_dir(lane_path) {
             let subpath = entry.path();
             let metadata = fs::metadata(&subpath)?;
             if metadata.is_file() {
-                filter_paths.push(subpath.into_os_string().into_string().unwrap();)
+                filter_paths.push(subpath)
             } else {
-                cbcl_paths.push(subpath.into_os_string().into_string().unwrap();)
+                cbcl_paths.push(subpath)
             }
         }
         return (cbcl_paths, filter_paths);
     }
 
-    fn read_cbcl_headers(cbcl_files) -> Vec<CBCLHeader> {
+    fn read_cbcl_header(cbcl_path : &Path) -> CBCLHeader {
+        return cbcl_decoder::cbcl_decoder(cbcl_path)
+    }
+
+    fn read_cbcl_headers(cbcl_paths : Vec<&Path>) -> Vec<CBCLHeader> {
+        let mut headers = Vec::new();
+        for cbcl_path in cbcl_paths {
+            let header = read_cbcl_header(cbcl_path);
+            headers.push(header);
+        }
+        return headers
+    }
+
+    // read in Tile struct from one cbcl_file (cbcl_path)
+    fn read_tiles(cbcl_path : &Path) -> Tile {
 
     }
 
-    // get from run_info
-    fn read_tile_nums(lane_path) -> Vec<i32> {
-
-    }
-
-    fn read_filters(lane_path, tiles) -> HashMap<i32, Filter> {
+    fn read_filters(lane_path : &Path, tiles : Vec<Vec<Tile>>) -> HashMap<i32, Filter> {
 
     }
 
@@ -66,7 +76,7 @@ impl Lane {
     }
 
     // output base_matrix, qscore_matrix
-    fn decode_cbcls(cbcl_files) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    fn compile_tiles(tiles : Vec<Vec<Tile>>) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
 
     }
 
@@ -82,15 +92,31 @@ impl Lane {
 
 }
 
-pub fn lane_collect(lane_path: String) -> Lane {
+pub fn lane_collect(lane_path: &Path) -> Lane {
     let f = File::open(lane_path).unwrap();
     let (cbcl_paths, filter_paths) = Lane::read_subpaths(lane_path);
 
     let lane = Lane {
         cbcl_paths,
-
+        filter_paths,
     };
 
     println!("{:#?}", lane);
     return lane;
+}
+
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    // **need to fill in this test once a test file exists***
+    #[test]
+    fn test_subpaths() {
+        let test_path = Path::new(); // lane path
+        let (actual_cbcl_paths : Vec<Path>, actual_filter_paths : Vec<Path>) = Lane::read_subpaths(test_path);
+        let expected_cbcl_paths = vec![Path::new(""), Path::new(""), Path::new()];
+        let expected_filter_paths = vec![Path::new(""), Path::new(""), Path::new()];
+    }
 }
