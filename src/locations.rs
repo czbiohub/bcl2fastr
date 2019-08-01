@@ -7,7 +7,7 @@ use std::{
 
 #[derive(Debug, PartialEq)]
 pub struct Locs {
-    pub locs : Vec<Vec<f32>>, //f32
+    pub locs : Vec<Vec<f32>>, //f32, tuples of xy coordinates corresponding to each tile
 }
 
 

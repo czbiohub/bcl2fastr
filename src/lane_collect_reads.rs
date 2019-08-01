@@ -4,6 +4,7 @@ use std::{
     fs,
     path::Path,
 };
+use glob::glob
 
 mod parser;
 mod cbcl_decoder;
@@ -11,12 +12,12 @@ mod filter_decoder;
 mod locations;
 
 pub struct Lane {
-    pub cbcl_paths : Vec<String>, // paths to each cbcl file
+    pub cbcl_paths : Result<Paths, PatternError>, // paths to each cbcl file
     pub headers : Vec<CBCLHeader>, // use cbcl_files to read in headers
     pub tiles : Vec<Vec<Tile>>, // tiles (holds all of the bases from each of the tiles), read in by cbcl_file
     // Tile struct holds base_matrix and qscore_matrix from each tile (sorted by Lane and Lane-part)
     // make sure to also store the tile number inside this struct
-    pub filter_paths : Vec<String>, // paths to each filter_file
+    pub filter_paths : Result<Paths, PatternError>, // paths to each filter_file
     pub filters : HashMap<i32, Filter>, // [tile_number, Filter object] read filters using filter_decoder
     pub base_matrix : Vec<Vec<u8>>, // (0 - 4)
     pub qscore_matrix : Vec<Vec<u8>>, // (0 - 4)
@@ -30,19 +31,10 @@ impl Lane {
     // run_id ex: 190414_A00111_0296_AHJCWWDSXX
 
     // reads in paths from the lane_path dir and sorts into subdirectories (cbcl) or files (filters)
-    fn read_subpaths(lane_path : &Path) -> (Vec<Path>, Vec<Path>) {
-        let cbcl_paths = Vec::new();
-        let filter_paths = Vec::new();
-        for entry in fs::read_dir(lane_path) {
-            let subpath = entry.path();
-            let metadata = fs::metadata(&subpath)?;
-            if metadata.is_file() {
-                filter_paths.push(subpath)
-            } else {
-                cbcl_paths.push(subpath)
-            }
-        }
-        return (cbcl_paths, filter_paths);
+    fn read_subpaths(lane_path : &Path) -> (Result<Paths, PatternError>, Result<Paths, PatternError>) {
+        let cbcl_paths = glob(lane_path + "/C*");
+        let filter_paths = glob(lane_path + "*.filter");
+        return (cbcl_paths, filter_paths)
     }
 
     fn read_cbcl_header(cbcl_path : &Path) -> CBCLHeader {

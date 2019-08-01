@@ -2,6 +2,7 @@
 extern crate serde_derive;
 extern crate serde;
 extern crate serde_xml_rs;
+extern crate glob;
 
 use std::path::Path;
 

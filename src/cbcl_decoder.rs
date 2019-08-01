@@ -7,6 +7,39 @@ use std::{
 
 
 #[derive(Debug, PartialEq)]
+pub struct CBCL {
+    pub cbcl_header : Vec<CBCLHeader>,  // one CBCLHeader per lane part
+    pub tiles : Vec<Tile>, 
+
+}
+
+impl CBCL {
+
+    fn decode_tiles(mut rdr : impl Read) -> Vec<Tile>{
+        // parse through the tile offsets in the cbcl file here and eventually call decode_tile
+
+        // very rough outline of how this would work
+        tiles = Vec::new();
+        for t in tiles {
+            tile = Tile::decode_tile();
+            tiles.push(tile);
+        }
+    }
+
+    fn decode_cbcl(cbcl_path : &Path) {
+        let f = File::open(cbcl_path).unwrap();
+        let cbcl_header = CBCLHeader::decode_cbcl_header(f).unwrap();
+        let tiles = Self::decode_tiles(f);
+
+        Ok(CBCL {
+            cbcl_header : cbcl_header,
+            tiles : tiles,
+        })
+    }
+}
+
+
+#[derive(Debug, PartialEq)]
 pub struct CBCLHeader {
     pub version : u16, // H
     pub header_size : u32, // I
@@ -23,7 +56,7 @@ pub struct CBCLHeader {
 
 
 impl CBCLHeader {
-    fn from_reader(mut rdr: impl Read) -> io::Result<Self> {
+    fn decode_cbcl_header(mut rdr: impl Read) -> io::Result<Self> {
         let version = rdr.read_u16::<LittleEndian>()?;
         let header_size = rdr.read_u32::<LittleEndian>()?;
         let bits_per_basecall = rdr.read_u8()?;
@@ -63,10 +96,20 @@ impl CBCLHeader {
 }
 
 
+pub fn cbcl_decoder(cbcl_path: &Path) -> CBCL {
+    let f = File::open(cbcl_path).unwrap();
+    let cbcl = CBCL::decode_all(f);
+    return cbcl
+}
+
+
 pub fn cbcl_decoder(cbcl_path: &Path) -> CBCLHeader{
     let f = File::open(cbcl_path).unwrap();
-    let cbcl = CBCLHeader::from_reader(f).unwrap();
-    println!("{:#?}", cbcl);
+    let cbcl_header = CBCLHeader::from_reader(f).unwrap();
+    let tiles = CBCL::read_raw_tiles(f).unwrap();
+
+    let cbcl = CBCL::read_raw_cbcl(f).unwrap();
+    println!("{:#?}", cbcl_header);
     return cbcl
 }
 
