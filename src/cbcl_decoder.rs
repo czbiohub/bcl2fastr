@@ -5,34 +5,39 @@ use std::{
     path::Path,
 };
 
+use crate::tile_decoder::Tile;
 
 #[derive(Debug, PartialEq)]
 pub struct CBCL {
-    pub cbcl_header : Vec<CBCLHeader>,  // one CBCLHeader per lane part
-    pub tiles : Vec<Tile>, 
-
+    pub cbcl_headers : Vec<CBCLHeader>,  // one CBCLHeader per lane part
+    pub tiles : Vec<Tile>,
 }
 
 impl CBCL {
 
-    fn decode_tiles(mut rdr : impl Read) -> Vec<Tile>{
+    pub fn decode_tiles(&mut self, mut rdr : impl Read) -> Vec<Tile>{
         // parse through the tile offsets in the cbcl file here and eventually call decode_tile
-
+        let raw_tiles = ;
         // very rough outline of how this would work
-        tiles = Vec::new();
-        for t in tiles {
-            tile = Tile::decode_tile();
-            tiles.push(tile);
+        self.tiles = Vec::new();
+        for t in raw_tiles {
+            let tile = Tile::decode_tile();
+            self.tiles.push(tile);
         }
     }
 
-    fn decode_cbcl(cbcl_path : &Path) {
+    pub fn decode_cbcl(&mut self, cbcl_path : &Path) -> io::Result<Self> {
         let f = File::open(cbcl_path).unwrap();
-        let cbcl_header = CBCLHeader::decode_cbcl_header(f).unwrap();
-        let tiles = Self::decode_tiles(f);
+        let lane_parts = ;
+        let cbcl_headers = Vec::new();
+        for l in lane_parts {
+            let cbcl_header = CBCLHeader::decode_cbcl_header(l).unwrap();
+            cbcl_headers.push(cbcl_header);
+        }
+        let tiles = CBCL::decode_tiles(&mut self, f);
 
         Ok(CBCL {
-            cbcl_header : cbcl_header,
+            cbcl_headers : cbcl_headers,
             tiles : tiles,
         })
     }
@@ -56,7 +61,7 @@ pub struct CBCLHeader {
 
 
 impl CBCLHeader {
-    fn decode_cbcl_header(mut rdr: impl Read) -> io::Result<Self> {
+    pub fn decode_cbcl_header(mut rdr: impl Read) -> io::Result<Self> {
         let version = rdr.read_u16::<LittleEndian>()?;
         let header_size = rdr.read_u32::<LittleEndian>()?;
         let bits_per_basecall = rdr.read_u8()?;
@@ -96,24 +101,6 @@ impl CBCLHeader {
 }
 
 
-pub fn cbcl_decoder(cbcl_path: &Path) -> CBCL {
-    let f = File::open(cbcl_path).unwrap();
-    let cbcl = CBCL::decode_all(f);
-    return cbcl
-}
-
-
-pub fn cbcl_decoder(cbcl_path: &Path) -> CBCLHeader{
-    let f = File::open(cbcl_path).unwrap();
-    let cbcl_header = CBCLHeader::from_reader(f).unwrap();
-    let tiles = CBCL::read_raw_tiles(f).unwrap();
-
-    let cbcl = CBCL::read_raw_cbcl(f).unwrap();
-    println!("{:#?}", cbcl_header);
-    return cbcl
-}
-
-
 #[cfg(test)]
 mod tests {
 
@@ -121,8 +108,8 @@ mod tests {
 
     #[test]
     fn test_cbclheader() {
-        let test_file = Path::new("src/test_data/test_cbcl_header.cbcl");
-        let actual_cbclheader : CBCLHeader = cbcl_decoder(test_file);
+        let test_file = Path::new("/usr/src/bcl2fastr_testlane/C116.1/L001_1.cbcl");
+        let actual_cbclheader : CBCLHeader = CBCLHeader::decode_cbcl_header(test_file);
         let expected_cbclheader =
             CBCLHeader {
                 version: 1,

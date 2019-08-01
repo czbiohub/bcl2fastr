@@ -12,8 +12,9 @@ mod filter_decoder;
 mod locations;
 
 pub struct Lane {
+    pub lane_path : &Path,  // path to the directory for the lane
     pub cbcl_paths : Result<Paths, PatternError>, // paths to each cbcl file
-    pub headers : Vec<CBCLHeader>, // use cbcl_files to read in headers
+    pub cbcls : Vec<CBCL>,  // holds each decoded CBCL struct for this lane
     pub tiles : Vec<Vec<Tile>>, // tiles (holds all of the bases from each of the tiles), read in by cbcl_file
     // Tile struct holds base_matrix and qscore_matrix from each tile (sorted by Lane and Lane-part)
     // make sure to also store the tile number inside this struct
@@ -23,7 +24,7 @@ pub struct Lane {
     pub qscore_matrix : Vec<Vec<u8>>, // (0 - 4)
     pub reads : Vec<Read>, // vec of Read structs built using the base_matrix and qscore_matrix as inputs
     pub indices : Vec<Index>, // keep track of the indices when you first read it? could be helpful?
-
+    pub locations: Vec<Vec<f32>>,  // tuples of xy coordinates corresponding to each tile
 }
 
 impl Lane {
@@ -31,44 +32,23 @@ impl Lane {
     // run_id ex: 190414_A00111_0296_AHJCWWDSXX
 
     // reads in paths from the lane_path dir and sorts into subdirectories (cbcl) or files (filters)
-    fn read_subpaths(lane_path : &Path) -> (Result<Paths, PatternError>, Result<Paths, PatternError>) {
+    fn read_subpaths(&mut self, lane_path : &Path) -> (Result<Paths, PatternError>, Result<Paths, PatternError>) {
         let cbcl_paths = glob(lane_path + "/C*");
         let filter_paths = glob(lane_path + "*.filter");
-        return (cbcl_paths, filter_paths)
+        self.cbcl_paths = cbcl_paths;
+        self.filter_paths = filter_paths;
     }
 
-    fn read_cbcl_header(cbcl_path : &Path) -> CBCLHeader {
-        return cbcl_decoder::cbcl_decoder(cbcl_path)
-    }
-
-    fn read_cbcl_headers(cbcl_paths : Vec<&Path>) -> Vec<CBCLHeader> {
-        let mut headers = Vec::new();
+    fn read_cbcls(&mut self, cbcl_paths : Vec<&Path>) -> Vec<CBCLHeader> {
+        let mut cbcls = Vec::new();
         for cbcl_path in cbcl_paths {
-            let header = read_cbcl_header(cbcl_path);
-            headers.push(header);
+            let cbcl = CBCL::decode_cbcl(cbcl_path).unwrap();
+            cbcls.push(cbcl);
         }
-        return headers
-    }
-
-    // read in Tile struct from one cbcl_file (cbcl_path)
-    fn read_tiles(cbcl_path : &Path) -> Tile {
-
+        self.cbcls = cbcls;
     }
 
     fn read_filters(lane_path : &Path, tiles : Vec<Vec<Tile>>) -> HashMap<i32, Filter> {
-
-    }
-
-    fn decode_base() -> u8 {
-
-    }
-
-    fn decode_qscore() -> u8 {
-
-    }
-
-    // output base_matrix, qscore_matrix
-    fn compile_tiles(tiles : Vec<Vec<Tile>>) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
 
     }
 
@@ -78,13 +58,29 @@ impl Lane {
 
     }
 
+    // use the base_matrix and qscore_matrix from each tile to compile the fastq files
     fn collect_reads(filters, base_matrix, q_score_matrix) {
 
+    }
+
+    fn decode_lane(&mut self, lane_path : &Path) -> Lane {
+        self.lane_path = lane_path;
+        let f = File::open(lane_path).unwrap();
+        Lane::read_subpaths(&mut self);
+
+        let lane = Lane {
+            self.lane_path,
+            self.cbcl_paths,
+            self.filter_paths,
+        }
+
+        println!("{:#?}", lane)
     }
 
 }
 
 pub fn lane_collect(lane_path: &Path) -> Lane {
+    self.lane_path =
     let f = File::open(lane_path).unwrap();
     let (cbcl_paths, filter_paths) = Lane::read_subpaths(lane_path);
 

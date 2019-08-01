@@ -1,4 +1,4 @@
-use byteorder::{LittleEndian, ReadBytesExt}
+use byteorder::{LittleEndian, ReadBytesExt};
 use std::{
     fs::File,
     io::{self, Read},
@@ -13,10 +13,20 @@ pub struct Tile {
 }
 
 impl Tile {
-
-    // return base matrix and q_score matrix for each tile
-    fn decode_tile() -> (Vec<Vec<u8>>, Vec<Vec<u8>>){
-
-    }
+    // 
+    // // byte to base (0-4)
+    // fn decode_base() -> u8 {
+    //
+    // }
+    //
+    // // byte to qscore (0-4)
+    // fn decode_qscore() -> u8 {
+    //
+    // }
+    //
+    // // return base matrix and q_score matrix for each tile
+    // fn decode_tile() -> (Vec<Vec<u8>>, Vec<Vec<u8>>){
+    //
+    // }
 
 }
