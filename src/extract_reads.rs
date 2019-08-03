@@ -2,24 +2,28 @@ use std::{
     fs::read_dir,
     path::Path,
 };
-use glob::glob;
+use crate::glob;
 
-use parser::parse_run_info;
-use parser::parse_run_params;
-use filter_decoder::filter_decoder;
-use locs_decoder::locs_decoder;
-use cbcl_header_decoder::cbcl_header_decoder;
+use crate::parser;
+use crate::filter_decoder;
+use crate::locs_decoder;
+use crate::cbcl_header_decoder;
 
 
-static LANE_PARTS : u8 = 2;  // supports 2 parts per lane
+static LANE_PARTS : u32 = 2;  // supports 2 parts per lane
+
+
+fn extract_base(lane_part_header : cbcl_header_decoder::CBCLHeader, lane_part_path : &Path, tile_idx : u32, loc : (u32, u32)) {
+
+}
 
 // extracts the reads for a particular lane and is then able to pass those into processes
 pub fn extract_reads(locs_path: &Path, run_info_path: &Path, run_params_path: &Path, lane_path: &Path) {
 
     // read in metadata for the run: locs path, run info path, run params paths
-    let locs = locs_decoder(locs_path);
-    let run_info = parse_run_info(run_info_path);
-    let run_params = parse_run_params(run_params_path);
+    let locs = locs_decoder::locs_decoder(locs_path);
+    let run_info = parser::parse_run_info(run_info_path);
+    let run_params = parser::parse_run_params(run_params_path);
 
     // expected number of cycles based on manual inputs into Run Parameters
     let num_cycles = run_params.read1_cycles + run_params.read2_cycles
@@ -27,44 +31,64 @@ pub fn extract_reads(locs_path: &Path, run_info_path: &Path, run_params_path: &P
     println!("Expected number of cycles: {}", num_cycles);
     // read in metadata for the lane: cbcl headers, filters:
     // read in cbcl and filter paths using glob
-    let cbcl_paths = glob(lane_path, "/C*").
+
+    let mut cbcl_paths = Vec::new(); 
+    let mut headers = Vec::new();
+    let c_paths = glob::glob(lane_path.join("C*").to_str().unwrap()).
             expect("Failed to read glob pattern for C* dirs");
-    let filter_paths = glob(lane_path, "*.filter").
+    for c_path in c_paths {
+        let lane_part_paths = glob::glob(c_path.unwrap().to_str().unwrap()).unwrap();
+        let mut lane_part_headers = Vec::new();
+        for part_path in lane_part_paths {
+            lane_part_headers.push(cbcl_header_decoder::cbcl_header_decoder(&part_path.unwrap()));
+        }
+        cbcl_paths.push(vec!(lane_part_paths));
+        headers.push(lane_part_headers);
+    }
+
+    println!("{}", lane_path.join("C*").to_str().unwrap());
+    let filter_paths = glob::glob(lane_path.join("*.filter").to_str().unwrap()).
             expect("Failed to read glob pattern for *.filter files");
+    println!("{}", lane_path.join("*.filter").to_str().unwrap());
 
-    println!("{:#}", cbcl_paths);
-    println!("{:#}", filter_paths);
-
-    // confirm that expected num_cycles matches the actual ones you're getting
-    println!("Actual number of cycles: {}", cbcl_paths.len());
-    if cbcl_paths.len() != num_cycles {
-        panic!("Expected number of cycles, {0}, does not match the number of
-            directories output by the sequencer, {1}.", num_cycles, cbcl_paths.len());
+    for c in c_paths {
+        println!("{:?}", c.unwrap().display());
     }
 
-    // read in all of the header information for the cbcl files in this lane
-    let mut headers = [[CBCLHeader; LANE_PARTS]; num_cycles];
-    for (c, cbcl_path) in cbcl_paths.enumerate() {
-        let lane_part_paths = fs::read_dir(cbcl_path).unwrap();
+    // // read in all of the header information for the cbcl files in this lane
+    // let mut headers = Vec::new();
+    // let mut c = 1;
+    // for cbcl_path in cbcl_paths {
+    //     let lane_part_paths = read_dir(cbcl_path.unwrap()).unwrap();
+    //     let mut lane_parts = Vec::new();
+    //     for part_path in lane_part_paths {
+    //         lane_parts.push(cbcl_header_decoder::cbcl_header_decoder(&part_path.unwrap().path()));
+    //     }
 
-        // check if number of lane part cbcls match the hard-coded lane parts
-        if lane_part_paths.len() != LANE_PARTS {
-            panic!("Number of lane parts for CBCL directory {0}, {1} does not match the number of
-                expected lane parts, {2}", c, lane_part_paths.len(), LANE_PARTS);
-        }
+    //     // check if number of lane part cbcls match the hard-coded lane parts
+    //     // if lane_parts.len() != LANE_PARTS as usize {
+    //     //     panic!("Number of lane parts for CBCL directory {0}, {1} does not match the number of
+    //     //         expected lane parts, {2}", c, lane_parts.len(), LANE_PARTS);
+    //     // }
+    //     c = c + 1;
+    //     headers.push(lane_parts);
 
-        for (p, part_path) in lane_part_paths.enumerate() {
-            headers[c][p] = cbcl_header_decoder(part_path);
-        }
-    }
-    println!("{:#?}", headers);
+    // }
+    // println!("{:#?}", headers);
 
-    // read in the filter paths as filter structs (there should be one for each tile)
-    let mut filters = [Filter; filter_paths.len()];
-    for (f, filter_path) in filter_paths.enumerate() {
-        filters[f] = filter_decoder(filter_path);
-    }
-    println!("{:#?}", filters);
+    // // confirm that expected num_cycles matches the actual ones you're getting
+    // // println!("Actual number of cycles: {}", headers.len());
+    // // if headers.len() != num_cycles as usize {
+    // //     panic!("Expected number of cycles, {0}, does not match the number of
+    // //         directories output by the sequencer, {1}.", num_cycles, headers.len());
+    // // }
+
+    // // read in the filter paths as filter structs (there should be one for each tile)
+    // let mut filters = Vec::new();
+    // for filter_path in filter_paths {
+    //     filters.push(filter_decoder::filter_decoder(&filter_path.unwrap()));
+    // }
+    // println!("{:#?}", filters);
 
 
 
