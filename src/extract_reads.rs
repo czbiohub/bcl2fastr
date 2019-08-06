@@ -1,15 +1,19 @@
+extern crate flate2;
+
 use std::{
-    fs::read_dir,
+    fs::File,
+    io::{
+        prelude::*,
+        SeekFrom,
+    },
     path::Path,
 };
 use crate::glob;
+use flate2::read::GzDecoder;
 
 use crate::parser;
 use crate::filter_decoder;
-use crate::locs_decoder::{
-    locs_decoder,
-    Locs,
-};
+use crate::locs_decoder;
 use crate::cbcl_header_decoder::{
     cbcl_header_decoder,
     CBCLHeader,
@@ -19,18 +23,51 @@ use crate::cbcl_header_decoder::{
 static LANE_PARTS : u32 = 2;  // supports 2 parts per lane
 
 
-fn extract_base(cbcl_path : &Path, tile_idx : u32, loc : (u32, u32)) {
+// cbcl_paths is of the shape (num_cycles, lane_parts)
+fn extract_base_matrix(headers : Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<&Path>>, tile_idces : Vec<u32>) {
+    // initialize base matrix and qscore matrix (Vec::new())
+    let base_matrix = Vec::new();
+    let qscore_matrix = Vec::new();
 
-}
+    // iterate through the cbcl_paths by cycle and then by lane part
+    let num_cycles = cbcl_paths.len();
+    for c in 0..num_cycles {
+        let num_parts = cbcl_paths[c].len();
+        for p in 0..num_parts {
+            // assign header and path
+            let header : CBCLHeader = headers[c][p];
+            let cbcl_path : &Path = cbcl_paths[c][p];
+            
+            // open file and seek to (header_size + start of tile_offsets of all the previous tiles before the first tile_idx) to skip those bytes of the file
+            let mut cbcl = File::open(cbcl_path).unwrap();
+            let first_idx = tile_idces[0] as usize;
+            // Note: must be Iterator to implement .sum()
+            let start_pos = header.header_size + header.tile_offsets[0..first_idx][3].iter().sum();
+            // Note: .into() converts header.header_size from u32 into u64 which is required by SeekFrom::Start()
+            cbcl.seek(SeekFrom::Start(header.header_size.into()));
+
+            // use GzDecoder to decompress the number of bytes summed over the offsets of all tile_idces
+            let last_idx = tile_idces[tile_idces.len() - 1] as usize;
+            let end_pos = header.tile_offsets[first_idx..last_idx][3].iter().sum();
+            cbcl.seek(SeekFrom::End(end_pos));
+            let mut tile_bytes = GzDecoder::new(cbcl).unwrap();
+
+            // check that size of decompressed tiles matches the size expected
+            let expected_size = header.tile_offsets[first_idx..last_idx][2].iter().sum() as usize;
+            let actual_size = tile_bytes.stream_len();
+            if  actual_size != expected_size {
+                panic!("Decompressed tile(s) were expected to be {0} bytes long but were {1} bytes long", expected_size, actual_size);
+            }
 
 
-fn extract_base_matrix(header : CBCLHeader, cbcl_path : &Path, tile_idces : Vec<u32>, locs : Locs) {
-    
+        }
+    }
 }
 
 // dcbcl is decompressed matrix of bases that is passed in to a process
 // this is the function implemented by a specific process (assigned a specific set of indices)
-fn get_read(dcbcl : Vec<Vec<u32>>, indices : (Vec<u32>, Vec<u32>), tile_idx : u32, loc : u32) {
+fn get_read(dcbcl : Vec<Vec<u32>>, indices : (Vec<u32>, Vec<u32>), tile_idces : Vec<u32>, loc : u32) {
+    
 
 }
 
@@ -39,7 +76,7 @@ fn get_read(dcbcl : Vec<Vec<u32>>, indices : (Vec<u32>, Vec<u32>), tile_idx : u3
 pub fn extract_reads(locs_path: &Path, run_info_path: &Path, run_params_path: &Path, lane_path: &Path, tile_idces : Vec<u32>) {
 
     // read in metadata for the run: locs path, run info path, run params paths
-    let locs = locs_decoder(locs_path);
+    let locs = locs_decoder::locs_decoder(locs_path);
     let run_info = parser::parse_run_info(run_info_path);
     let run_params = parser::parse_run_params(run_params_path);
 
@@ -101,8 +138,10 @@ pub fn extract_reads(locs_path: &Path, run_info_path: &Path, run_params_path: &P
     for cbcl_data in &flat_headers.zip(&flat_paths) {
         let header = cbcl_data.0.as_ref().unwrap();
         let path = cbcl_data.1.as_ref().unwrap();
-  
-        extract_base_matrix(header, path, tile_idces, locs)
+    
+        // for a particular process:
+        extract_base_matrix(header, path, tile_idces)
+        get_read()
     } 
     
 
