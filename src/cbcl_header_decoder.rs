@@ -84,7 +84,7 @@ mod tests {
         let expected_cbclheader =
             CBCLHeader {
                 version: 1,
-                header_size: 7537,
+                header_size: 65,
                 bits_per_basecall: 2,
                 bits_per_qscore: 2,
                 number_of_bins: 4,
@@ -106,40 +106,16 @@ mod tests {
                         37,
                     ],
                 ],
-                num_tile_records: 5,
+                num_tile_records: 1,
                 tile_offsets: vec![
                     vec![
                         1101,
-                        4091904,
-                        2045952,
-                        1353104,
-                    ],
-                    vec![
-                        1102,
-                        4091904,
-                        2045952,
-                        1354714,
-                    ],
-                    vec![
-                        1103,
-                        4091904,
-                        2045952,
-                        1352351,
-                    ],
-                    vec![
-                        1104,
-                        4091904,
-                        2045952,
-                        1349026,
-                    ],
-                    vec![
-                        1105,
-                        4091904,
-                        2045952,
-                        1349369,
-                    ],
+                        3366129,
+                        1683065,
+                        1088959,
+                    ]
                 ],
-                non_PF_clusters_excluded: 0,
+                non_PF_clusters_excluded: 1,
             };
         assert_eq!(actual_cbclheader, expected_cbclheader)
     }
