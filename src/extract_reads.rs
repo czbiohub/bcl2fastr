@@ -40,7 +40,7 @@ pub fn extract_reads(locs_path: &Path, run_info_path: &Path, run_params_path: &P
     // expected number of cycles based on manual inputs into Run Parameters
     let num_cycles = run_params.read1_cycles + run_params.read2_cycles
         + run_params.index1_cycles + run_params.index2_cycles;
-    println!("Expected number of cycles: {}", num_cycles);
+
     // read in metadata for the lane: cbcl headers, filters:
     // read in cbcl and filter paths using glob
 
@@ -48,62 +48,45 @@ pub fn extract_reads(locs_path: &Path, run_info_path: &Path, run_params_path: &P
     let mut headers = Vec::new();
     let c_paths : Vec<_> = glob::glob(lane_path.join("C*").to_str().unwrap()).
             expect("Failed to read glob pattern for C* dirs").collect();
+
     for c_path in &c_paths {
-        let lane_part_paths : Vec<_> = glob::glob(c_path.as_ref().unwrap().to_str().unwrap()).unwrap().collect();
+        let lane_part_paths : Vec<_> = glob::glob(c_path.as_ref().unwrap().join("*").to_str().unwrap()).unwrap().collect();
+        // println!("Lane part paths: {:#?}", lane_part_paths);
+
+        // // check if number of lane part cbcls match the hard-coded lane parts
+        // // `as usize` converts a u32 into a usize type which allows for inequality comparison
+        // if lane_part_paths.len() != LANE_PARTS as usize {
+        //     panic!("Number of lane parts, {0}, for CBCL directory {1:#?}, does not match the number of
+        //         expected lane parts, {2}", lane_part_paths.len(), c_path.as_ref().unwrap(), LANE_PARTS);
+        // }
+
         let mut lane_part_headers = Vec::new();
         // need to borrow lane_part_paths as a reference in order to avoid using the value after move later in the code
         for part_path in &lane_part_paths {
             // &part_path.as_ref() changes the value to be unwrapped from &Option<T> to &Option<&T> which doesn't assume ownership
+            // println!("{:#?}", &part_path.as_ref().unwrap());
             lane_part_headers.push(cbcl_header_decoder::cbcl_header_decoder(&part_path.as_ref().unwrap()));
         }
+
         cbcl_paths.push(vec!(lane_part_paths));
         headers.push(lane_part_headers);
     }
 
-    println!("{}", lane_path.join("C*").to_str().unwrap());
-    let filter_paths = glob::glob(lane_path.join("*.filter").to_str().unwrap()).
-            expect("Failed to read glob pattern for *.filter files");
-    println!("{}", lane_path.join("*.filter").to_str().unwrap());
-
-    for c in c_paths {
-        println!("{:?}", c.unwrap().display());
-    }
-
-    // // read in all of the header information for the cbcl files in this lane
-    // let mut headers = Vec::new();
-    // let mut c = 1;
-    // for cbcl_path in cbcl_paths {
-    //     let lane_part_paths = read_dir(cbcl_path.unwrap()).unwrap();
-    //     let mut lane_parts = Vec::new();
-    //     for part_path in lane_part_paths {
-    //         lane_parts.push(cbcl_header_decoder::cbcl_header_decoder(&part_path.unwrap().path()));
-    //     }
-
-    //     // check if number of lane part cbcls match the hard-coded lane parts
-    //     // `as usize` converts a u32 into a usize type which allows for inequality comparison
-    //     // if lane_parts.len() != LANE_PARTS as usize {
-    //     //     panic!("Number of lane parts for CBCL directory {0}, {1} does not match the number of
-    //     //         expected lane parts, {2}", c, lane_parts.len(), LANE_PARTS);
-    //     // }
-    //     c = c + 1;
-    //     headers.push(lane_parts);
-
-    // }
-    // println!("{:#?}", headers);
-
+    let filter_paths : Vec<_> = glob::glob(lane_path.join("*.filter").to_str().unwrap()).
+            expect("Failed to read glob pattern for *.filter files").collect();
+    
     // // confirm that expected num_cycles matches the actual ones you're getting
-    // // println!("Actual number of cycles: {}", headers.len());
-    // // if headers.len() != num_cycles as usize {
-    // //     panic!("Expected number of cycles, {0}, does not match the number of
-    // //         directories output by the sequencer, {1}.", num_cycles, headers.len());
-    // // }
-
-    // // read in the filter paths as filter structs (there should be one for each tile)
-    // let mut filters = Vec::new();
-    // for filter_path in filter_paths {
-    //     filters.push(filter_decoder::filter_decoder(&filter_path.unwrap()));
+    // if headers.len() != num_cycles as usize {
+    //     panic!("Expected number of cycles, {0}, does not match the number of
+    //         directories present in the input files, {1}", num_cycles, headers.len());
     // }
-    // println!("{:#?}", filters);
+
+    // read in the filter paths as filter structs (there should be one for each tile)
+    let mut filters = Vec::new();
+    for filter_path in &filter_paths {
+        filters.push(filter_decoder::filter_decoder(&filter_path.as_ref().unwrap()));
+    }
+    println!("{:#?}", filters);
 
 
 
