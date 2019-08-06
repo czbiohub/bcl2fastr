@@ -80,7 +80,7 @@ mod tests {
     #[test]
     fn test_cbclheader() {
         let test_file = Path::new("/usr/src/bcl2fastr_testlane/C116.1/L001_1.cbcl");
-        let actual_cbclheader : CBCLHeader = CBCLHeader::decode_cbcl_header(test_file);
+        let actual_cbclheader : CBCLHeader = cbcl_header_decoder(test_file);
         let expected_cbclheader =
             CBCLHeader {
                 version: 1,
