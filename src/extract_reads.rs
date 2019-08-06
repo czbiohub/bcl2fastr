@@ -13,9 +13,21 @@ use crate::cbcl_header_decoder;
 static LANE_PARTS : u32 = 2;  // supports 2 parts per lane
 
 
-fn extract_base(lane_part_header : cbcl_header_decoder::CBCLHeader, lane_part_path : &Path, tile_idx : u32, loc : (u32, u32)) {
+fn extract_base(cbcl_path : &Path, lane_part : u32, tile_idx : u32, loc : (u32, u32)) {
 
 }
+
+
+fn extract_base_matrix(cbcl_path : &Path, lane_part : u32, tile_idces : Vec<u32>, locs : Vec<(u32, u32)>) {
+
+}
+
+// dcbcl is decompressed matrix of bases that is passed in to a process
+// this is the function implemented by a specific process (assigned a specific set of indices)
+fn get_read(dcbcl : Vec<Vec<u32>>, indices : (Vec<u32>, Vec<u32>), tile_idx : u32, loc : u32) {
+
+}
+
 
 // extracts the reads for a particular lane and is then able to pass those into processes
 pub fn extract_reads(locs_path: &Path, run_info_path: &Path, run_params_path: &Path, lane_path: &Path) {
@@ -34,13 +46,15 @@ pub fn extract_reads(locs_path: &Path, run_info_path: &Path, run_params_path: &P
 
     let mut cbcl_paths = Vec::new(); 
     let mut headers = Vec::new();
-    let c_paths = glob::glob(lane_path.join("C*").to_str().unwrap()).
-            expect("Failed to read glob pattern for C* dirs");
-    for c_path in c_paths {
-        let lane_part_paths = glob::glob(c_path.unwrap().to_str().unwrap()).unwrap();
+    let c_paths : Vec<_> = glob::glob(lane_path.join("C*").to_str().unwrap()).
+            expect("Failed to read glob pattern for C* dirs").collect();
+    for c_path in &c_paths {
+        let lane_part_paths : Vec<_> = glob::glob(c_path.as_ref().unwrap().to_str().unwrap()).unwrap().collect();
         let mut lane_part_headers = Vec::new();
-        for part_path in lane_part_paths {
-            lane_part_headers.push(cbcl_header_decoder::cbcl_header_decoder(&part_path.unwrap()));
+        // need to borrow lane_part_paths as a reference in order to avoid using the value after move later in the code
+        for part_path in &lane_part_paths {
+            // &part_path.as_ref() changes the value to be unwrapped from &Option<T> to &Option<&T> which doesn't assume ownership
+            lane_part_headers.push(cbcl_header_decoder::cbcl_header_decoder(&part_path.as_ref().unwrap()));
         }
         cbcl_paths.push(vec!(lane_part_paths));
         headers.push(lane_part_headers);
