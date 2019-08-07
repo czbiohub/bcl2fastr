@@ -24,10 +24,10 @@ static LANE_PARTS : u32 = 2;  // supports 2 parts per lane
 
 
 // cbcl_paths is of the shape (num_cycles, lane_parts)
-fn extract_base_matrix(headers : Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<&Path>>, tile_idces : Vec<u32>) {
+fn extract_base_matrix(headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<std::path::PathBuf>>, tile_idces : Vec<u32>) {
     // initialize base matrix and qscore matrix (Vec::new())
-    let base_matrix = Vec::new();
-    let qscore_matrix = Vec::new();
+    let mut base_matrix : Vec<Vec<u32>> = Vec::new();
+    let mut qscore_matrix : Vec<Vec<u32>> = Vec::new();
 
     // iterate through the cbcl_paths by cycle and then by lane part
     let num_cycles = cbcl_paths.len();
@@ -35,26 +35,49 @@ fn extract_base_matrix(headers : Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<&Pat
         let num_parts = cbcl_paths[c].len();
         for p in 0..num_parts {
             // assign header and path
-            let header : CBCLHeader = headers[c][p];
-            let cbcl_path : &Path = cbcl_paths[c][p];
+            let header = &headers[c][p];
+            let cbcl_path = &cbcl_paths[c][p];
             
             // open file and seek to (header_size + start of tile_offsets of all the previous tiles before the first tile_idx) to skip those bytes of the file
             let mut cbcl = File::open(cbcl_path).unwrap();
             let first_idx = tile_idces[0] as usize;
+            let last_idx = tile_idces[tile_idces.len() - 1] as usize;
             // Note: must be Iterator to implement .sum()
-            let start_pos = header.header_size + header.tile_offsets[0..first_idx][3].iter().sum();
-            // Note: .into() converts header.header_size from u32 into u64 which is required by SeekFrom::Start()
-            cbcl.seek(SeekFrom::Start(header.header_size.into()));
+            // println!("{:#?}", &header.tile_offsets[first_idx]);
+
+            // if the first index is 0, edge case where you can't slice from 0..0, so need to have a separate condition
+            let start_pos;
+            if first_idx == 0 {
+                start_pos = 0;
+            } else {
+                start_pos = (header.header_size + &header.tile_offsets[..first_idx][3].iter().sum::<u32>()) as u64;
+            }
+            // Note: need `as u64` above since SeekFrom::Start() takes in u64
+            cbcl.seek(SeekFrom::Start(start_pos));
 
             // use GzDecoder to decompress the number of bytes summed over the offsets of all tile_idces
-            let last_idx = tile_idces[tile_idces.len() - 1] as usize;
-            let end_pos = header.tile_offsets[first_idx..last_idx][3].iter().sum();
+            println!("{:#?}", &header.tile_offsets[0..1]);
+
+            // if number of tiles is 1, then slicing returns a u32 instead of a vector slice, so .iter() needs to be avoided
+            let num_tiles = tile_idces.len();
+            let end_pos;
+            let expected_size;
+            if num_tiles == 1 {
+                end_pos = header.tile_offsets[last_idx][3] as i64; // index 3 is the compressed tile size 
+                expected_size = header.tile_offsets[last_idx][2] as usize; // index 2 is the uncompressed tile size
+            } else {
+                end_pos = header.tile_offsets[first_idx..last_idx][3].iter().sum::<u32>() as i64; // index 3 is the compressed tile size
+                expected_size = header.tile_offsets[first_idx..last_idx][2].iter().sum::<u32>() as usize; // index 2 is the compressed tile size
+            }
+            
+            // Note: need `as i64` above since SeekFrom::End() takes in i64
             cbcl.seek(SeekFrom::End(end_pos));
-            let mut tile_bytes = GzDecoder::new(cbcl).unwrap();
+            // decode the bytes of tiles using GzDecoder and open the file
+            let mut tile_bytes : Vec<u8> = Vec::new();
+            GzDecoder::new(&cbcl).read_to_end(&mut tile_bytes);
 
             // check that size of decompressed tiles matches the size expected
-            let expected_size = header.tile_offsets[first_idx..last_idx][2].iter().sum() as usize;
-            let actual_size = tile_bytes.stream_len();
+            let actual_size = tile_bytes.len();
             if  actual_size != expected_size {
                 panic!("Decompressed tile(s) were expected to be {0} bytes long but were {1} bytes long", expected_size, actual_size);
             }
@@ -104,15 +127,18 @@ pub fn extract_reads(locs_path: &Path, run_info_path: &Path, run_params_path: &P
         // }
 
         let mut lane_part_headers = Vec::new();
+        let mut formatted_part_paths = Vec::new();
         // need to borrow lane_part_paths as a reference in order to avoid using the value after move later in the code
-        for part_path in &lane_part_paths {
+        for part_path in lane_part_paths {
             // &part_path.as_ref() changes the value to be unwrapped from &Option<T> to &Option<&T> which doesn't assume ownership
             // println!("{:#?}", &part_path.as_ref().unwrap());
-            lane_part_headers.push(cbcl_header_decoder(&part_path.as_ref().unwrap()));
+            // let test = part_path.as_ref().unwrap();
+            lane_part_headers.push(cbcl_header_decoder(part_path.as_ref().unwrap()));
+            formatted_part_paths.push(part_path.unwrap());
         }
 
-        cbcl_paths.push(vec!(lane_part_paths));
         headers.push(lane_part_headers);
+        cbcl_paths.push(formatted_part_paths);
     }
 
     let filter_paths : Vec<_> = glob::glob(lane_path.join("*.filter").to_str().unwrap()).
@@ -127,23 +153,24 @@ pub fn extract_reads(locs_path: &Path, run_info_path: &Path, run_params_path: &P
     // read in the filter paths as filter structs (there should be one for each tile)
     let mut filters = Vec::new();
     for filter_path in &filter_paths {
-        filters.push(filter_decoder::filter_decoder(&filter_path.as_ref().unwrap()));
+        filters.push(filter_decoder::filter_decoder(filter_path.as_ref().unwrap()));
     }
     println!("{:#?}", filters);
 
     // 
     // Note: could just get rid of headers matrix and get each header as you go through that cbcl file
-    let flat_headers = headers.iter().flatten();
-    let flat_paths = cbcl_paths.iter().flatten();
-    for cbcl_data in &flat_headers.zip(&flat_paths) {
-        let header = cbcl_data.0.as_ref().unwrap();
-        let path = cbcl_data.1.as_ref().unwrap();
+    // let flat_headers = headers.iter().flatten();
+    // let flat_paths = cbcl_paths.iter().flatten();
+    // for cbcl_data in &flat_headers.zip(&flat_paths) {
+    //     let header = cbcl_data.0.as_ref().unwrap();
+    //     let path = cbcl_data.1.as_ref().unwrap();
     
-        // for a particular process:
-        extract_base_matrix(header, path, tile_idces)
-        get_read()
-    } 
+    //     // for a particular process:
+    //     extract_base_matrix(header, path, tile_idces)
+    //     get_read()
+    // } 
     
+    extract_base_matrix(&headers, cbcl_paths, tile_idces);
 
 
 }
