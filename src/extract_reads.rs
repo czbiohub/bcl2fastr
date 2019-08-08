@@ -9,7 +9,10 @@ use std::{
     path::Path,
 };
 use crate::glob;
-use flate2::read::GzDecoder;
+use flate2::read::{
+    GzDecoder,
+    MultiGzDecoder,
+};
 
 use crate::parser;
 use crate::filter_decoder;
@@ -24,7 +27,7 @@ static LANE_PARTS : u32 = 2;  // supports 2 parts per lane
 
 
 // cbcl_paths is of the shape (num_cycles, lane_parts)
-fn extract_base_matrix(headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<std::path::PathBuf>>, tile_idces : Vec<u32>) {
+fn extract_base_matrix(headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<std::path::PathBuf>>, tile_idces : Vec<u32>) -> std::io::Result<()> {
     // initialize base matrix and qscore matrix (Vec::new())
     let mut base_matrix : Vec<Vec<u32>> = Vec::new();
     let mut qscore_matrix : Vec<Vec<u32>> = Vec::new();
@@ -38,53 +41,59 @@ fn extract_base_matrix(headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<std
             let header = &headers[c][p];
             let cbcl_path = &cbcl_paths[c][p];
             
-            // open file and seek to (header_size + start of tile_offsets of all the previous tiles before the first tile_idx) to skip those bytes of the file
-            let mut cbcl = File::open(cbcl_path).unwrap();
+            // open file and read whole file into a buffer 
+            let mut cbcl = File::open(cbcl_path)?;
+            let mut whole_buffer = Vec::new();
+            cbcl.read_to_end(&mut whole_buffer)?;
+
+            // identify first and last tile index to later get start and end byte position
             let first_idx = tile_idces[0] as usize;
             let last_idx = tile_idces[tile_idces.len() - 1] as usize;
-            // Note: must be Iterator to implement .sum()
-            // println!("{:#?}", &header.tile_offsets[first_idx]);
 
+            // calculate start byte position
             // if the first index is 0, edge case where you can't slice from 0..0, so need to have a separate condition
             let start_pos;
             if first_idx == 0 {
                 start_pos = 0;
             } else {
-                start_pos = (header.header_size + &header.tile_offsets[..first_idx][3].iter().sum::<u32>()) as u64;
+                start_pos = (header.header_size + &header.tile_offsets[..first_idx][3].iter().sum::<u32>()) as usize;
             }
-            // Note: need `as u64` above since SeekFrom::Start() takes in u64
-            cbcl.seek(SeekFrom::Start(start_pos));
-
-            // use GzDecoder to decompress the number of bytes summed over the offsets of all tile_idces
-            println!("{:#?}", &header.tile_offsets[0..1]);
-
+            
+            // calculate end byte position and expected size of the decompressed tile(s)
             // if number of tiles is 1, then slicing returns a u32 instead of a vector slice, so .iter() needs to be avoided
             let num_tiles = tile_idces.len();
             let end_pos;
             let expected_size;
             if num_tiles == 1 {
-                end_pos = header.tile_offsets[last_idx][3] as i64; // index 3 is the compressed tile size 
+                end_pos = header.tile_offsets[last_idx][3] as usize; // index 3 is the compressed tile size 
                 expected_size = header.tile_offsets[last_idx][2] as usize; // index 2 is the uncompressed tile size
             } else {
-                end_pos = header.tile_offsets[first_idx..last_idx][3].iter().sum::<u32>() as i64; // index 3 is the compressed tile size
+                end_pos = header.tile_offsets[first_idx..last_idx][3].iter().sum::<u32>() as usize; // index 3 is the compressed tile size
                 expected_size = header.tile_offsets[first_idx..last_idx][2].iter().sum::<u32>() as usize; // index 2 is the compressed tile size
             }
             
-            // Note: need `as i64` above since SeekFrom::End() takes in i64
-            cbcl.seek(SeekFrom::End(end_pos));
-            // decode the bytes of tiles using GzDecoder and open the file
-            let mut tile_bytes : Vec<u8> = Vec::new();
-            GzDecoder::new(&cbcl).read_to_end(&mut tile_bytes);
+            // slice buffer by appropriate start_pos and end_pos
+            let tile_bytes = &whole_buffer[start_pos..end_pos];
+            // println!("{}", end_pos - start_pos);
+            // println!("{}", tile_bytes.len());
+
+            // use GzDecoder to decompress the number of bytes summed over the offsets of all tile_idces
+            let mut uncomp_bytes = Vec::new();
+            let mut gz = MultiGzDecoder::new(tile_bytes);
+            println!("built new decoder");
+            gz.read_to_end(&mut uncomp_bytes)?;
+            
+            println!("finished decoding");
 
             // check that size of decompressed tiles matches the size expected
-            let actual_size = tile_bytes.len();
+            let actual_size = uncomp_bytes.len();
+            println!("{0} {1}", actual_size, expected_size);
             if  actual_size != expected_size {
                 panic!("Decompressed tile(s) were expected to be {0} bytes long but were {1} bytes long", expected_size, actual_size);
             }
-
-
         }
     }
+    Ok(())
 }
 
 // dcbcl is decompressed matrix of bases that is passed in to a process
@@ -96,7 +105,7 @@ fn get_read(dcbcl : Vec<Vec<u32>>, indices : (Vec<u32>, Vec<u32>), tile_idces : 
 
 
 // extracts the reads for a particular lane and is then able to pass those into processes
-pub fn extract_reads(locs_path: &Path, run_info_path: &Path, run_params_path: &Path, lane_path: &Path, tile_idces : Vec<u32>) {
+pub fn extract_reads(locs_path: &Path, run_info_path: &Path, run_params_path: &Path, lane_path: &Path, tile_idces : Vec<u32>) -> std::io::Result<()> {
 
     // read in metadata for the run: locs path, run info path, run params paths
     let locs = locs_decoder::locs_decoder(locs_path);
@@ -158,7 +167,6 @@ pub fn extract_reads(locs_path: &Path, run_info_path: &Path, run_params_path: &P
     println!("{:#?}", filters);
 
     // 
-    // Note: could just get rid of headers matrix and get each header as you go through that cbcl file
     // let flat_headers = headers.iter().flatten();
     // let flat_paths = cbcl_paths.iter().flatten();
     // for cbcl_data in &flat_headers.zip(&flat_paths) {
@@ -170,7 +178,6 @@ pub fn extract_reads(locs_path: &Path, run_info_path: &Path, run_params_path: &P
     //     get_read()
     // } 
     
-    extract_base_matrix(&headers, cbcl_paths, tile_idces);
-
+    extract_base_matrix(&headers, cbcl_paths, tile_idces)
 
 }
