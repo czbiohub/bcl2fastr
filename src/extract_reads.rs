@@ -1,5 +1,5 @@
 extern crate flate2;
-extern crate libflate;
+// extern crate libflate;
 
 use std::{
     fs::File,
@@ -14,7 +14,7 @@ use flate2::read::{
     GzDecoder,
     MultiGzDecoder,
 };
-use libflate::gzip::MultiDecoder;
+// use libflate::gzip::MultiDecoder;
 
 use crate::parser;
 use crate::filter_decoder;
@@ -43,6 +43,7 @@ fn extract_base_matrix(headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<std
             let header = &headers[c][p];
             let cbcl_path = &cbcl_paths[c][p];
             
+            // TODO: change to a method of seeking the indices instead of reading
             // open file and read whole file into a buffer 
             let mut cbcl = File::open(cbcl_path)?;
             let mut whole_buffer = Vec::new();
@@ -56,7 +57,7 @@ fn extract_base_matrix(headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<std
             // if the first index is 0, edge case where you can't slice from 0..0, so need to have a separate condition
             let start_pos;
             if first_idx == 0 {
-                start_pos = 0;
+                start_pos = header.header_size as usize;
             } else {
                 start_pos = (header.header_size + &header.tile_offsets[..first_idx][3].iter().sum::<u32>()) as usize;
             }
@@ -67,10 +68,10 @@ fn extract_base_matrix(headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<std
             let end_pos;
             let expected_size;
             if num_tiles == 1 {
-                end_pos = header.tile_offsets[last_idx][3] as usize; // index 3 is the compressed tile size 
+                end_pos = (header.header_size + header.tile_offsets[last_idx][3]) as usize; // index 3 is the compressed tile size 
                 expected_size = header.tile_offsets[last_idx][2] as usize; // index 2 is the uncompressed tile size
             } else {
-                end_pos = header.tile_offsets[first_idx..last_idx][3].iter().sum::<u32>() as usize; // index 3 is the compressed tile size
+                end_pos = (header.header_size + header.tile_offsets[first_idx..last_idx][3].iter().sum::<u32>()) as usize; // index 3 is the compressed tile size
                 expected_size = header.tile_offsets[first_idx..last_idx][2].iter().sum::<u32>() as usize; // index 2 is the compressed tile size
             }
             
@@ -79,20 +80,21 @@ fn extract_base_matrix(headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<std
             // println!("{}", end_pos - start_pos);
             // println!("{}", tile_bytes.len());
 
-            // trying with the libflate crate instead of with flate2
-            let mut decoder = MultiDecoder::new(&whole_buffer[start_pos..end_pos]).unwrap();
-            println!("built new decoder");
-            let mut uncomp_bytes = Vec::new();
-            decoder.read_to_end(&mut uncomp_bytes).unwrap();
-            println!("finished decoding");
-
-            // // use GzDecoder to uncompress the number of bytes summed over the offsets of all tile_idces
+            // // trying with the libflate crate instead of with flate2
+            // let mut decoder = MultiDecoder::new(&whole_buffer[start_pos..end_pos]).unwrap();
+            // println!("built new decoder");
             // let mut uncomp_bytes = Vec::new();
-            // let mut gz = MultiGzDecoder::new(&whole_buffer[start_pos..end_pos]); // FIX: not reading in the tile_bytes as a stream, just sees the struct of the bytes, so doesn't work??
-            // // println!("built new decoder");
-            // // won't go past read_to_end bc it's returning an error: "StringError "invalid gzip header""
-            // gz.read_to_end(&mut uncomp_bytes).unwrap();
-            // // println!("finished decoding");
+            // decoder.read_to_end(&mut uncomp_bytes).unwrap();
+            // println!("finished decoding");
+            
+            //flate2
+            // use GzDecoder to uncompress the number of bytes summed over the offsets of all tile_idces
+            let mut uncomp_bytes = Vec::new();
+            let mut gz = MultiGzDecoder::new(&whole_buffer[start_pos..end_pos]); // FIX: not reading in the tile_bytes as a stream, just sees the struct of the bytes, so doesn't work??
+            println!("built new decoder");
+            // won't go past read_to_end bc it's returning an error: "StringError "invalid gzip header""
+            gz.read_to_end(&mut uncomp_bytes).unwrap();
+            println!("finished decoding");
 
             // check that size of decompressed tiles matches the size expected
             let actual_size = uncomp_bytes.len();
