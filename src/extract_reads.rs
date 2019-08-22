@@ -73,17 +73,18 @@ fn extract_base_matrix(headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<std
             }
             
             // slice buffer by appropriate start_pos and end_pos
-            let tile_bytes = &whole_buffer[start_pos..end_pos];
+            // let tile_bytes = &whole_buffer[start_pos..end_pos].to_vec();
             // println!("{}", end_pos - start_pos);
             // println!("{}", tile_bytes.len());
 
-            // use GzDecoder to decompress the number of bytes summed over the offsets of all tile_idces
+            // use GzDecoder to uncompress the number of bytes summed over the offsets of all tile_idces
             let mut uncomp_bytes = Vec::new();
-            let mut gz = MultiGzDecoder::new(tile_bytes);
-            println!("built new decoder");
-            gz.read_to_end(&mut uncomp_bytes)?;
+            let mut gz = MultiGzDecoder::new(&whole_buffer[start_pos..end_pos]); // FIX: not reading in the tile_bytes as a stream, just sees the struct of the bytes, so doesn't work??
+            // println!("built new decoder");
+            // won't go past read_to_end bc it's returning an error: "StringError "invalid gzip header""
+            gz.read_to_end(&mut uncomp_bytes).unwrap();
             
-            println!("finished decoding");
+            // println!("finished decoding");
 
             // check that size of decompressed tiles matches the size expected
             let actual_size = uncomp_bytes.len();
@@ -137,11 +138,8 @@ pub fn extract_reads(locs_path: &Path, run_info_path: &Path, run_params_path: &P
 
         let mut lane_part_headers = Vec::new();
         let mut formatted_part_paths = Vec::new();
-        // need to borrow lane_part_paths as a reference in order to avoid using the value after move later in the code
         for part_path in lane_part_paths {
-            // &part_path.as_ref() changes the value to be unwrapped from &Option<T> to &Option<&T> which doesn't assume ownership
-            // println!("{:#?}", &part_path.as_ref().unwrap());
-            // let test = part_path.as_ref().unwrap();
+            // part_path.as_ref() changes the value to be unwrapped from Option<T> to Option<&T> which doesn't assume ownership
             lane_part_headers.push(cbcl_header_decoder(part_path.as_ref().unwrap()));
             formatted_part_paths.push(part_path.unwrap());
         }
@@ -165,6 +163,13 @@ pub fn extract_reads(locs_path: &Path, run_info_path: &Path, run_params_path: &P
         filters.push(filter_decoder::filter_decoder(filter_path.as_ref().unwrap()));
     }
     println!("{:#?}", filters);
+
+    // // confirm that expected num_tiles matches the number of filters you're getting
+    // let num_tiles = run_info.runs[0].flow_cell_layout[0].tile_set[0].tiles[0].tile.len();
+    // if filters.len() != num_tiles as usize {
+    //     panic!("Number of filters, {0}, does not match the expected number of tiles outlined in the run's flow cell layout, {1}", filters.len(), num_tiles);
+    // }
+
 
     // 
     // let flat_headers = headers.iter().flatten();
