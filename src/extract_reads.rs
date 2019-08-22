@@ -1,4 +1,5 @@
 extern crate flate2;
+extern crate libflate;
 
 use std::{
     fs::File,
@@ -13,6 +14,7 @@ use flate2::read::{
     GzDecoder,
     MultiGzDecoder,
 };
+use libflate::gzip::MultiDecoder;
 
 use crate::parser;
 use crate::filter_decoder;
@@ -77,14 +79,20 @@ fn extract_base_matrix(headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<std
             // println!("{}", end_pos - start_pos);
             // println!("{}", tile_bytes.len());
 
-            // use GzDecoder to uncompress the number of bytes summed over the offsets of all tile_idces
+            // trying with the libflate crate instead of with flate2
+            let mut decoder = MultiDecoder::new(&whole_buffer[start_pos..end_pos]).unwrap();
+            println!("built new decoder");
             let mut uncomp_bytes = Vec::new();
-            let mut gz = MultiGzDecoder::new(&whole_buffer[start_pos..end_pos]); // FIX: not reading in the tile_bytes as a stream, just sees the struct of the bytes, so doesn't work??
-            // println!("built new decoder");
-            // won't go past read_to_end bc it's returning an error: "StringError "invalid gzip header""
-            gz.read_to_end(&mut uncomp_bytes).unwrap();
-            
-            // println!("finished decoding");
+            decoder.read_to_end(&mut uncomp_bytes).unwrap();
+            println!("finished decoding");
+
+            // // use GzDecoder to uncompress the number of bytes summed over the offsets of all tile_idces
+            // let mut uncomp_bytes = Vec::new();
+            // let mut gz = MultiGzDecoder::new(&whole_buffer[start_pos..end_pos]); // FIX: not reading in the tile_bytes as a stream, just sees the struct of the bytes, so doesn't work??
+            // // println!("built new decoder");
+            // // won't go past read_to_end bc it's returning an error: "StringError "invalid gzip header""
+            // gz.read_to_end(&mut uncomp_bytes).unwrap();
+            // // println!("finished decoding");
 
             // check that size of decompressed tiles matches the size expected
             let actual_size = uncomp_bytes.len();
