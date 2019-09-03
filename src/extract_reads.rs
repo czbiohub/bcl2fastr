@@ -172,7 +172,7 @@ pub fn extract_reads(locs_path: &Path, run_info_path: &Path, run_params_path: &P
     for filter_path in &filter_paths {
         filters.push(filter_decoder::filter_decoder(filter_path.as_ref().unwrap()));
     }
-    println!("{:#?}", filters);
+    //    println!("{:#?}", filters);
 
     // // confirm that expected num_tiles matches the number of filters you're getting
     // let num_tiles = run_info.runs[0].flow_cell_layout[0].tile_set[0].tiles[0].tile.len();
