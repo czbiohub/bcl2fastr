@@ -55,7 +55,9 @@ def create_small_lane(test_path, lane_path, wanted_num_tiles):
             tile_offsets = []
             for tile_num in range(wanted_num_tiles):
                 # check the shape of this thing you're appending!!
-                tile_offsets.append(struct.unpack("<IIII", f.read(16)))
+                tile_offsets.append(
+                    struct.unpack("<IIII", tile_offsets_bytes[tile_num * 16 : (tile_num + 1) * 16])
+                )
                 
             print(tile_offsets)
 
