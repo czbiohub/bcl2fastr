@@ -2,11 +2,12 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use std::{
     fs::File,
     io::{self, Read},
+    path::Path,
 };
 
 #[derive(Debug, PartialEq)]
 pub struct Locs {
-    pub locs : Vec<Vec<f32>>, //f32
+    pub locs : Vec<Vec<f32>>, //f32, tuples of xy coordinates corresponding to each tile
 }
 
 
@@ -28,7 +29,7 @@ impl Locs {
 }
 
 
-pub fn locs_decoder(locs_path: String) -> Locs {
+pub fn locs_decoder(locs_path: &Path) -> Locs {
     let f = File::open(locs_path).unwrap();
     let locs = Locs::from_reader(f).unwrap();
     println!("{:#?}", locs);
@@ -43,7 +44,7 @@ mod tests {
 
     #[test]
     fn test_locs() {
-        let test_file = "src/test_data/test_locs.locs".to_string();
+        let test_file = Path::new("src/test_data/test_locs.locs");
         let actual_locs : Locs = locs_decoder(test_file);
         let expected_locs =
             Locs {

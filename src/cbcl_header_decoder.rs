@@ -2,6 +2,7 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use std::{
     fs::File,
     io::{self, Read},
+    path::Path,
 };
 
 
@@ -22,7 +23,7 @@ pub struct CBCLHeader {
 
 
 impl CBCLHeader {
-    fn from_reader(mut rdr: impl Read) -> io::Result<Self> {
+    pub fn from_reader(mut rdr: impl Read) -> io::Result<Self> {
         let version = rdr.read_u16::<LittleEndian>()?;
         let header_size = rdr.read_u32::<LittleEndian>()?;
         let bits_per_basecall = rdr.read_u8()?;
@@ -62,12 +63,13 @@ impl CBCLHeader {
 }
 
 
-pub fn cbcl_decoder(cbcl_path: String) -> CBCLHeader{
+pub fn cbcl_header_decoder(cbcl_path : &Path) -> CBCLHeader {
     let f = File::open(cbcl_path).unwrap();
-    let cbcl = CBCLHeader::from_reader(f).unwrap();
-    println!("{:#?}", cbcl);
-    return cbcl
+    let cbcl_header = CBCLHeader::from_reader(f).unwrap();
+    println!("{:#?}", cbcl_header);
+    return cbcl_header;
 }
+
 
 
 #[cfg(test)]
@@ -77,12 +79,12 @@ mod tests {
 
     #[test]
     fn test_cbclheader() {
-        let test_file = "src/test_data/test_cbcl_header.cbcl".to_string();
-        let actual_cbclheader : CBCLHeader = cbcl_decoder(test_file);
+        let test_file = Path::new("/usr/src/bcl2fastr_testlane/C116.1/L001_1.cbcl");
+        let actual_cbclheader : CBCLHeader = cbcl_header_decoder(test_file);
         let expected_cbclheader =
             CBCLHeader {
                 version: 1,
-                header_size: 7537,
+                header_size: 65,
                 bits_per_basecall: 2,
                 bits_per_qscore: 2,
                 number_of_bins: 4,
@@ -104,40 +106,16 @@ mod tests {
                         37,
                     ],
                 ],
-                num_tile_records: 5,
+                num_tile_records: 1,
                 tile_offsets: vec![
                     vec![
                         1101,
-                        4091904,
-                        2045952,
-                        1353104,
-                    ],
-                    vec![
-                        1102,
-                        4091904,
-                        2045952,
-                        1354714,
-                    ],
-                    vec![
-                        1103,
-                        4091904,
-                        2045952,
-                        1352351,
-                    ],
-                    vec![
-                        1104,
-                        4091904,
-                        2045952,
-                        1349026,
-                    ],
-                    vec![
-                        1105,
-                        4091904,
-                        2045952,
-                        1349369,
-                    ],
+                        3366129,
+                        1683065,
+                        1088959,
+                    ]
                 ],
-                non_PF_clusters_excluded: 0,
+                non_PF_clusters_excluded: 1,
             };
         assert_eq!(actual_cbclheader, expected_cbclheader)
     }
