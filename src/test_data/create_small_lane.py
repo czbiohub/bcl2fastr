@@ -3,6 +3,7 @@ import struct
 import os
 import glob
 import shutil
+import sys
 
 
 def create_small_lane(test_path, lane_path, wanted_num_tiles):
@@ -75,5 +76,7 @@ def create_small_lane(test_path, lane_path, wanted_num_tiles):
 
             
 if __name__ == "__main__":
-    create_small_lane("/usr/src/bcl2fastr/src/test_data", "/usr/src/bcl2fastr_data/L001", 1)
+    save_path = sys.argv[1]
+    data_path = sys.argv[2]
+    create_small_lane(save_path, data_path, 1)
 
