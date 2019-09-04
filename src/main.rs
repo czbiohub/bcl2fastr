@@ -28,9 +28,9 @@ fn main() {
     let locs_path = Path::new("src/test_data/test_locs.locs");
     let run_info_path = Path::new("src/test_data/RunInfo.xml");
     let run_params_path = Path::new("src/test_data/test_runparams.xml");
-    let lane_path = Path::new("/usr/src/bcl2fastr_testlane/");
+    let lane_path = Path::new("src/test_data/test_lane/");
 
-    extract_reads::extract_reads(locs_path, run_info_path, run_params_path, lane_path);
+    extract_reads::extract_reads(locs_path, run_info_path, run_params_path, lane_path, vec![0]);
 
 
 }
