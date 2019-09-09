@@ -42,7 +42,7 @@ mod tests {
 
     #[test]
     fn test_filter() {
-        let test_file = Path::new("src/test_data/test_filter.filter");
+        let test_file = Path::new("test_data/test_filter.filter");
         let actual_filter : Filter = filter_decoder(test_file);
         let expected_filter =
             Filter {

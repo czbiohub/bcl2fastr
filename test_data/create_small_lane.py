@@ -34,8 +34,8 @@ def create_small_lane(test_path, lane_path, wanted_num_tiles):
     actual_cbcl_files = sorted(glob.glob(os.path.join(lane_path, "C*", f"{lane_name}_1.cbcl")))
  
     for cbcl_file in actual_cbcl_files:
-        # test_dir_cbcl_path:  /usr/src/bcl2fastr/src/test_data/test_lane/C1.1
-        # test_lane_basename:  /usr/src/bcl2fastr/src/test_data/test_lane/C1.1/L001_1.cbcl
+        # test_dir_cbcl_path:  /usr/src/bcl2fastr/test_data/test_lane/C1.1
+        # test_lane_basename:  /usr/src/bcl2fastr/test_data/test_lane/C1.1/L001_1.cbcl
         test_dir_cbcl_path = os.path.join(test_lane_path, os.path.basename(os.path.dirname(cbcl_file)))
         test_lane_basename = os.path.join(test_dir_cbcl_path, os.path.basename(cbcl_file))
         
