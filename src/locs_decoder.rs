@@ -44,7 +44,7 @@ mod tests {
 
     #[test]
     fn test_locs() {
-        let test_file = Path::new("src/test_data/test_locs.locs");
+        let test_file = Path::new("test_data/test_locs.locs");
         let actual_locs : Locs = locs_decoder(test_file);
         let expected_locs =
             Locs {

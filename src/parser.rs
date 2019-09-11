@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn test_runinfo() {
-        let filename_info = Path::new("src/test_data/RunInfo.xml");
+        let filename_info = Path::new("test_data/RunInfo.xml");
         let actual_runinfo : RunInfo = parse_run_info(filename_info);
         let expected_runinfo =
             RunInfo {
@@ -185,7 +185,7 @@ mod tests {
 
     #[test]
     fn test_runparams() {
-        let filename_params = Path::new("src/test_data/test_runparams.xml");
+        let filename_params = Path::new("test_data/test_runparams.xml");
         let actual_runparams : RunParams = parse_run_params(filename_params);
         let expected_runparams =
             RunParams {
