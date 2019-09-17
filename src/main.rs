@@ -25,10 +25,10 @@ fn main() {
     // locs_decoder::locs_decoder(locs_file);
     // filter_decoder::filter_decoder(filter_file);
 
-    let locs_path = Path::new("test_data/test_locs.locs");
-    let run_info_path = Path::new("test_data/RunInfo.xml");
+    let locs_path = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/s.locs");
+    let run_info_path = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/RunInfo.xml");
     let run_params_path = Path::new("test_data/test_runparams.xml");
-    let lane_path = Path::new("test_data/test_lane/");
+    let lane_path = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/BaseCalls/L001");
 
     extract_reads::extract_reads(locs_path, run_info_path, run_params_path, lane_path, vec![0]);
 

@@ -42,16 +42,21 @@ mod tests {
 
     #[test]
     fn test_filter() {
-        let test_file = Path::new("test_data/test_filter.filter");
-        let actual_filter : Filter = filter_decoder(test_file);
+        let test_file = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/BaseCalls/L001/s_1_1101.filter");
+        let actual_filter: Filter = filter_decoder(test_file);
         let expected_filter =
             Filter {
                 bin_mask: vec![
-                    false,
-                    false,
-                    false,
-                    true,
-                    true,
+                    false, false, false, true, true, true, true, true, false, false,
+                    true, false, true, true, true, true, true, true, true, true,
+                    true, false, true, true, true, true, true, true, true, true,
+                    true, true, true, true, true, true, true, true, true, true,
+                    false, true, true, true, true, true, true, true, true, true,
+                    false, true, true, true, true, true, true, true, true, false,
+                    true, true, true, true, false, true, true, true, true, true,
+                    true, false, true, true, true, false, false, true, true, true,
+                    true, false, true, true, true, true, true, true, true, false,
+                    true, true, false, false, true, true, true, false, false, false,
                 ],
             };
         assert_eq!(actual_filter, expected_filter);

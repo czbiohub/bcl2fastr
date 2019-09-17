@@ -16,9 +16,8 @@ pub struct CBCLHeader {
     pub bins : Vec<Vec<u32>>, //I
     pub num_tile_records : u32, //I
     pub tile_offsets : Vec<Vec<u32>>, //I [tile number, num clusters, uncompressed
-                                                // block size, compressed block size]
-    pub non_PF_clusters_excluded : u8, //B, converted from u8 to bool
-
+                                      // block size, compressed block size]
+    pub non_pf_clusters_excluded : u8, //B, converted from u8 to bool
 }
 
 
@@ -44,7 +43,7 @@ impl CBCLHeader {
             let comp_block_size = rdr.read_u32::<LittleEndian>()?;
             tile_offsets.push(vec![tile_number, num_clusters, uncomp_block_size, comp_block_size]);
         }
-        let non_PF_clusters_excluded = rdr.read_u8()?;
+        let non_pf_clusters_excluded = rdr.read_u8()?;
 
 
         Ok(CBCLHeader {
@@ -56,7 +55,7 @@ impl CBCLHeader {
             bins,
             num_tile_records,
             tile_offsets,
-            non_PF_clusters_excluded,
+            non_pf_clusters_excluded,
         })
     }
 
@@ -79,43 +78,28 @@ mod tests {
 
     #[test]
     fn test_cbclheader() {
-        let test_file = Path::new("test_data/test_lane/C116.1/L001_1.cbcl");
+        let test_file = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/BaseCalls/L001/C1.1/L001_1.cbcl");
         let actual_cbclheader : CBCLHeader = cbcl_header_decoder(test_file);
         let expected_cbclheader =
             CBCLHeader {
                 version: 1,
-                header_size: 65,
+                header_size: 97,
                 bits_per_basecall: 2,
                 bits_per_qscore: 2,
                 number_of_bins: 4,
                 bins: vec![
-                    vec![
-                        0,
-                        0,
-                    ],
-                    vec![
-                        1,
-                        11,
-                    ],
-                    vec![
-                        2,
-                        25,
-                    ],
-                    vec![
-                        3,
-                        37,
-                    ],
+                    vec![0, 0],
+                    vec![1, 11],
+                    vec![2, 25],
+                    vec![3, 37],
                 ],
-                num_tile_records: 1,
+                num_tile_records: 3,
                 tile_offsets: vec![
-                    vec![
-                        1101,
-                        3366129,
-                        1683065,
-                        1088959,
-                    ]
+                    vec![1101, 100, 50, 73],
+                    vec![1102, 100, 50, 73],
+                    vec![1103, 100, 50, 73],
                 ],
-                non_PF_clusters_excluded: 1,
+                non_pf_clusters_excluded: 0,
             };
         assert_eq!(actual_cbclheader, expected_cbclheader)
     }

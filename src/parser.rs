@@ -36,7 +36,7 @@ pub struct FlowcellLayout {
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct TileSet {
-    #[serde(rename = "TileNamingconvention", default)]
+    #[serde(rename = "TileNamingConvention", default)]
     pub tile_naming_convention : String,
     #[serde(rename = "Tiles", default)]
     pub tiles : Vec<Tiles>
@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn test_runinfo() {
-        let filename_info = Path::new("test_data/RunInfo.xml");
+        let filename_info = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/RunInfo.xml");
         let actual_runinfo : RunInfo = parse_run_info(filename_info);
         let expected_runinfo =
             RunInfo {
@@ -142,33 +142,43 @@ mod tests {
                                 read: vec![
                                     Read {
                                         number: 1,
-                                        num_cycles: 150,
+                                        num_cycles: 4,
                                         is_indexed_read: "N".to_string()
                                     },
                                     Read {
                                         number: 2,
                                         num_cycles: 8,
                                         is_indexed_read: "Y".to_string()
+                                    },
+                                    Read {
+                                        number: 3,
+                                        num_cycles: 8,
+                                        is_indexed_read: "Y".to_string()
+                                    },
+                                    Read {
+                                        number: 4,
+                                        num_cycles: 4,
+                                        is_indexed_read: "N".to_string()
                                     }
                                 ]
                             }
                         ],
                         flow_cell_layout: vec![
                             FlowcellLayout {
-                                lane_count: 4,
-                                surface_count: 2,
+                                lane_count: 1,
+                                surface_count: 1,
                                 swath_count: 6,
-                                tile_count: 78,
+                                tile_count: 3,
                                 flowcell_side: 1,
                                 tile_set: vec![
                                     TileSet {
-                                        tile_naming_convention: "".to_string(),
+                                        tile_naming_convention: "FourDigit".to_string(),
                                         tiles: vec![
                                             Tiles {
                                                 tile: vec![
-                                                    "1_2101".to_string(),
-                                                    "1_2102".to_string(),
-                                                    "1_2103".to_string()
+                                                    "1_1101".to_string(),
+                                                    "1_1102".to_string(),
+                                                    "1_1103".to_string()
                                                 ]
                                             }
                                         ]
