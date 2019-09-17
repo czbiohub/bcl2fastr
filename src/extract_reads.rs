@@ -1,20 +1,12 @@
 extern crate flate2;
-// extern crate libflate;
 
 use std::{
     fs::File,
-    io::{
-        prelude::*,
-        SeekFrom,
-    },
+    io::prelude::*,
     path::Path,
 };
 use crate::glob;
-use flate2::read::{
-    GzDecoder,
-    MultiGzDecoder,
-};
-// use libflate::gzip::MultiDecoder;
+use flate2::read::MultiGzDecoder;
 
 use crate::parser;
 use crate::filter_decoder;
@@ -23,9 +15,6 @@ use crate::cbcl_header_decoder::{
     cbcl_header_decoder,
     CBCLHeader,
 };
-
-
-static LANE_PARTS : u32 = 2;  // supports 2 parts per lane
 
 
 // cbcl_paths is of the shape (num_cycles, lane_parts)
@@ -74,25 +63,12 @@ fn extract_base_matrix(headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<std
                 end_pos = (header.header_size + header.tile_offsets[first_idx..last_idx][3].iter().sum::<u32>()) as usize; // index 3 is the compressed tile size
                 expected_size = header.tile_offsets[first_idx..last_idx][2].iter().sum::<u32>() as usize; // index 2 is the compressed tile size
             }
-            
-            // slice buffer by appropriate start_pos and end_pos
-            // let tile_bytes = &whole_buffer[start_pos..end_pos].to_vec();
-            // println!("{}", end_pos - start_pos);
-            // println!("{}", tile_bytes.len());
 
-            // // trying with the libflate crate instead of with flate2
-            // let mut decoder = MultiDecoder::new(&whole_buffer[start_pos..end_pos]).unwrap();
-            // println!("built new decoder");
-            // let mut uncomp_bytes = Vec::new();
-            // decoder.read_to_end(&mut uncomp_bytes).unwrap();
-            // println!("finished decoding");
-            
-            //flate2
-            // use GzDecoder to uncompress the number of bytes summed over the offsets of all tile_idces
+            // use MultiGzDecoder to uncompress the number of bytes summed over the offsets of all tile_idces
             let mut uncomp_bytes = Vec::new();
-            let mut gz = MultiGzDecoder::new(&whole_buffer[start_pos..end_pos]); // FIX: not reading in the tile_bytes as a stream, just sees the struct of the bytes, so doesn't work??
+            let mut gz = MultiGzDecoder::new(&whole_buffer[start_pos..end_pos]);
             println!("built new decoder");
-            // won't go past read_to_end bc it's returning an error: "StringError "invalid gzip header""
+
             gz.read_to_end(&mut uncomp_bytes).unwrap();
             println!("finished decoding");
 
@@ -132,14 +108,6 @@ pub fn extract_reads(locs_path: &Path, run_info_path: &Path, lane_path: &Path, t
 
     for c_path in &c_paths {
         let lane_part_paths : Vec<_> = glob::glob(c_path.as_ref().unwrap().join("*").to_str().unwrap()).unwrap().collect();
-        // println!("Lane part paths: {:#?}", lane_part_paths);
-
-        // // check if number of lane part cbcls match the hard-coded lane parts
-        // // `as usize` converts a u32 into a usize type which allows for inequality comparison
-        // if lane_part_paths.len() != LANE_PARTS as usize {
-        //     panic!("Number of lane parts, {0}, for CBCL directory {1:#?}, does not match the number of
-        //         expected lane parts, {2}", lane_part_paths.len(), c_path.as_ref().unwrap(), LANE_PARTS);
-        // }
 
         let mut lane_part_headers = Vec::new();
         let mut formatted_part_paths = Vec::new();
@@ -161,27 +129,6 @@ pub fn extract_reads(locs_path: &Path, run_info_path: &Path, lane_path: &Path, t
     for filter_path in &filter_paths {
         filters.push(filter_decoder::filter_decoder(filter_path.as_ref().unwrap()));
     }
-    //    println!("{:#?}", filters);
 
-    // // confirm that expected num_tiles matches the number of filters you're getting
-    // let num_tiles = run_info.runs[0].flow_cell_layout[0].tile_set[0].tiles[0].tile.len();
-    // if filters.len() != num_tiles as usize {
-    //     panic!("Number of filters, {0}, does not match the expected number of tiles outlined in the run's flow cell layout, {1}", filters.len(), num_tiles);
-    // }
-
-
-    // 
-    // let flat_headers = headers.iter().flatten();
-    // let flat_paths = cbcl_paths.iter().flatten();
-    // for cbcl_data in &flat_headers.zip(&flat_paths) {
-    //     let header = cbcl_data.0.as_ref().unwrap();
-    //     let path = cbcl_data.1.as_ref().unwrap();
-    
-    //     // for a particular process:
-    //     extract_base_matrix(header, path, tile_idces)
-    //     get_read()
-    // } 
-    
     extract_base_matrix(&headers, cbcl_paths, tile_idces)
-
 }

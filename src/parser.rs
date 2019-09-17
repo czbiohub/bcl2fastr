@@ -7,7 +7,6 @@ use serde_xml_rs::from_reader;
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct Read {
-    //run_path: String, // path to specific run dir
     #[serde(rename = "Number", default)]
     pub number : u64, // parsed from run info, outputed in fastq
     #[serde(rename = "NumCycles", default)]
@@ -59,7 +58,6 @@ pub struct Reads {
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct Run {
-    //run_path: String, // path to specific run dir
     #[serde(rename = "Id", default)]
     pub id : String, // parsed from run info, outputed in fastq
     #[serde(rename = "Number", default)]
