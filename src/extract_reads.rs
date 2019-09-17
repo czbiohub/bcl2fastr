@@ -116,16 +116,11 @@ fn get_read(dcbcl : Vec<Vec<u32>>, indices : (Vec<u32>, Vec<u32>), tile_idces : 
 
 
 // extracts the reads for a particular lane and is then able to pass those into processes
-pub fn extract_reads(locs_path: &Path, run_info_path: &Path, run_params_path: &Path, lane_path: &Path, tile_idces : Vec<u32>) -> std::io::Result<()> {
+pub fn extract_reads(locs_path: &Path, run_info_path: &Path, lane_path: &Path, tile_idces : Vec<u32>) -> std::io::Result<()> {
 
     // read in metadata for the run: locs path, run info path, run params paths
     let locs = locs_decoder::locs_decoder(locs_path);
     let run_info = parser::parse_run_info(run_info_path);
-    let run_params = parser::parse_run_params(run_params_path);
-
-    // expected number of cycles based on manual inputs into Run Parameters
-    let num_cycles = run_params.read1_cycles + run_params.read2_cycles
-        + run_params.index1_cycles + run_params.index2_cycles;
 
     // read in metadata for the lane: cbcl headers, filters:
     // read in cbcl and filter paths using glob
@@ -160,12 +155,6 @@ pub fn extract_reads(locs_path: &Path, run_info_path: &Path, run_params_path: &P
 
     let filter_paths : Vec<_> = glob::glob(lane_path.join("*.filter").to_str().unwrap()).
             expect("Failed to read glob pattern for *.filter files").collect();
-    
-    // // confirm that expected num_cycles matches the actual ones you're getting
-    // if headers.len() != num_cycles as usize {
-    //     panic!("Expected number of cycles, {0}, does not match the number of
-    //         directories present in the input files, {1}", num_cycles, headers.len());
-    // }
 
     // read in the filter paths as filter structs (there should be one for each tile)
     let mut filters = Vec::new();

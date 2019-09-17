@@ -86,29 +86,6 @@ pub struct RunInfo {
 }
 
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
-pub struct RunParams {
-    #[serde(rename = "ReadType", default)]
-    pub read_type : String, // if paired-end read (determines if you double cycle numbers)
-    #[serde(rename = "Read1NumberOfCycles", default)]
-    pub read1_cycles : u64,
-    #[serde(rename = "Read2NumberOfCycles", default)]
-    pub read2_cycles : u64,
-    #[serde(rename = "IndexRead1NumberOfCycles", default)]
-    pub index1_cycles : u64,
-    #[serde(rename = "IndexRead2NumberOfCycles", default)]
-    pub index2_cycles : u64,
-}
-
-
-pub fn parse_run_params(run_params_path: &Path) -> RunParams {
-    println!("reading file {}", run_params_path.display());
-    let params_xml = fs::read_to_string(run_params_path).expect("error reading the file");
-    let runparams : RunParams = from_reader(params_xml.as_bytes()).unwrap();
-    println!("{:#?}", runparams);
-    return runparams
-}
-
 pub fn parse_run_info(run_info_path: &Path) -> RunInfo {
     println!("reading file {}", run_info_path.display());
     let run_xml = fs::read_to_string(run_info_path).expect("error reading the file");
@@ -191,20 +168,5 @@ mod tests {
             };
         assert_eq!(actual_runinfo, expected_runinfo)
 
-    }
-
-    #[test]
-    fn test_runparams() {
-        let filename_params = Path::new("test_data/test_runparams.xml");
-        let actual_runparams : RunParams = parse_run_params(filename_params);
-        let expected_runparams =
-            RunParams {
-                read_type: "PairedEnd".to_string(),
-                read1_cycles: 150,
-                read2_cycles: 150,
-                index1_cycles: 8,
-                index2_cycles: 8
-            };
-        assert_eq!(actual_runparams, expected_runparams)
     }
 }
