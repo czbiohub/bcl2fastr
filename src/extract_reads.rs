@@ -21,8 +21,8 @@ use crate::cbcl_header_decoder::{
 // cbcl_paths is of the shape (num_cycles, lane_parts)
 fn extract_base_matrix(headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<std::path::PathBuf>>, tile_idces : Vec<u32>) -> std::io::Result<()> {
     // initialize base matrix and qscore matrix (Vec::new())
-    let mut base_matrix : Vec<Vec<u32>> = Vec::new();
-    let mut qscore_matrix : Vec<Vec<u32>> = Vec::new();
+    // let mut base_matrix : Vec<Vec<u32>> = Vec::new();
+    // let mut qscore_matrix : Vec<Vec<u32>> = Vec::new();
 
     // iterate through the cbcl_paths by cycle and then by lane part
     let num_cycles = cbcl_paths.len();
@@ -44,8 +44,7 @@ fn extract_base_matrix(headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<std
             if first_idx == 0 {
                 start_pos = header.header_size as u64;
             } else {
-                // TODO: this never worked
-                start_pos = (header.header_size + &header.tile_offsets[..first_idx][3].iter().sum::<u32>()) as u64;
+                start_pos = (header.header_size + &header.tile_offsets[..first_idx].iter().map(|v| v[3]).sum::<u32>()) as u64;
             }
 
             // calculate end byte position and expected size of the decompressed tile(s)
@@ -60,11 +59,10 @@ fn extract_base_matrix(headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<std
                 // index 3 is the compressed tile size
                 compressed_size = header.tile_offsets[first_idx][3] as usize;
             } else {
-                // TODO: This code never worked
                 // index 2 is the uncompressed tile size
-                uncompressed_size = header.tile_offsets[first_idx..last_idx][2].iter().sum::<u32>() as usize;
+                uncompressed_size = header.tile_offsets[first_idx..last_idx].iter().map(|v| v[2]).sum::<u32>() as usize;
                 // index 3 is the compressed tile size
-                compressed_size = header.tile_offsets[first_idx..last_idx][3].iter().sum::<u32>() as usize;
+                compressed_size = header.tile_offsets[first_idx..last_idx].iter().map(|v| v[3]).sum::<u32>() as usize;
             }
 
             // open file and read whole file into a buffer
@@ -72,18 +70,15 @@ fn extract_base_matrix(headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<std
             cbcl.seek(SeekFrom::Start(start_pos))?;
 
             let mut read_buffer = vec![0u8; compressed_size];
-            println!("compressed size is {0}", compressed_size);
             cbcl.read_exact(&mut read_buffer)?;
-            let mut gz = MultiGzDecoder::new(&read_buffer[..]);
 
             // use MultiGzDecoder to uncompress the number of bytes summed over the offsets of all tile_idces
             let mut uncomp_bytes = vec![0u8; uncompressed_size];
-            println!("uncompressed size is {0}", uncompressed_size);
+            let mut gz = MultiGzDecoder::new(&read_buffer[..]);
             gz.read_exact(&mut uncomp_bytes)?;
 
             // check that size of decompressed tiles matches the size expected
             let actual_size = uncomp_bytes.len();
-            println!("{0} {1}", actual_size, uncompressed_size);
             if  actual_size != uncompressed_size {
                 panic!("Decompressed tile(s) were expected to be {0} bytes long but were {1} bytes long", uncompressed_size, actual_size);
             }
@@ -94,18 +89,16 @@ fn extract_base_matrix(headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<std
 
 // dcbcl is decompressed matrix of bases that is passed in to a process
 // this is the function implemented by a specific process (assigned a specific set of indices)
-fn get_read(dcbcl : Vec<Vec<u32>>, indices : (Vec<u32>, Vec<u32>), tile_idces : Vec<u32>, loc : u32) {
-    
-
-}
+//fn get_read(dcbcl : Vec<Vec<u32>>, indices : (Vec<u32>, Vec<u32>), tile_idces : Vec<u32>, loc : u32) {
+//}
 
 
 // extracts the reads for a particular lane and is then able to pass those into processes
 pub fn extract_reads(locs_path: &Path, run_info_path: &Path, lane_path: &Path, tile_idces : Vec<u32>) -> std::io::Result<()> {
 
     // read in metadata for the run: locs path, run info path, run params paths
-    let locs = locs_decoder::locs_decoder(locs_path);
-    let run_info = parser::parse_run_info(run_info_path);
+    let _locs = locs_decoder::locs_decoder(locs_path);
+    let _run_info = parser::parse_run_info(run_info_path);
 
     // read in metadata for the lane: cbcl headers, filters:
     // read in cbcl and filter paths using glob
