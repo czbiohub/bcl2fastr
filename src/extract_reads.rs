@@ -5,6 +5,7 @@ use std::{
     io::prelude::*,
     io::SeekFrom,
     path::Path,
+    path::PathBuf,
 };
 use crate::glob;
 use flate2::read::MultiGzDecoder;
@@ -19,7 +20,9 @@ use crate::cbcl_header_decoder::{
 
 
 // cbcl_paths is of the shape (num_cycles, lane_parts)
-fn extract_base_matrix(headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<std::path::PathBuf>>, tile_idces : Vec<u32>) -> std::io::Result<()> {
+fn extract_base_matrix(
+    headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : &Vec<Vec<PathBuf>>, tile_idces : Vec<u32>
+) -> std::io::Result<()> {
     // initialize base matrix and qscore matrix (Vec::new())
     // let mut base_matrix : Vec<Vec<u32>> = Vec::new();
     // let mut qscore_matrix : Vec<Vec<u32>> = Vec::new();
@@ -30,8 +33,8 @@ fn extract_base_matrix(headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<std
         let num_parts = cbcl_paths[c].len();
         for p in 0..num_parts {
             // assign header and path
-            let header = &headers[c][p];
-            let cbcl_path = &cbcl_paths[c][p];
+            let header: &CBCLHeader = &headers[c][p];
+            let cbcl_path: &PathBuf = &cbcl_paths[c][p];
             
             // identify first and last tile index to later get start and end byte position
             let first_idx = tile_idces[0] as usize;
@@ -44,7 +47,7 @@ fn extract_base_matrix(headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<std
             if first_idx == 0 {
                 start_pos = header.header_size as u64;
             } else {
-                start_pos = (header.header_size + &header.tile_offsets[..first_idx].iter().map(|v| v[3]).sum::<u32>()) as u64;
+                start_pos = (header.header_size + header.tile_offsets[..first_idx].iter().map(|v| v[3]).sum::<u32>()) as u64;
             }
 
             // calculate end byte position and expected size of the decompressed tile(s)
@@ -132,5 +135,5 @@ pub fn extract_reads(locs_path: &Path, run_info_path: &Path, lane_path: &Path, t
         filters.push(filter_decoder::filter_decoder(filter_path.as_ref().unwrap()));
     }
 
-    extract_base_matrix(&headers, cbcl_paths, tile_idces)
+    extract_base_matrix(&headers, &cbcl_paths, tile_idces)
 }
