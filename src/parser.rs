@@ -85,10 +85,8 @@ pub struct RunInfo {
 
 
 pub fn parse_run_info(run_info_path: &Path) -> RunInfo {
-    println!("reading file {}", run_info_path.display());
     let run_xml = fs::read_to_string(run_info_path).expect("error reading the file");
     let runinfo : RunInfo = from_reader(run_xml.as_bytes()).unwrap();
-    println!("{:#?}", runinfo);
     return runinfo
 }
 

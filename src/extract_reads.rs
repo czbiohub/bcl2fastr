@@ -3,6 +3,7 @@ extern crate flate2;
 use std::{
     fs::File,
     io::prelude::*,
+    io::SeekFrom,
     path::Path,
 };
 use crate::glob;
@@ -32,51 +33,59 @@ fn extract_base_matrix(headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : Vec<Vec<std
             let header = &headers[c][p];
             let cbcl_path = &cbcl_paths[c][p];
             
-            // TODO: change to a method of seeking the indices instead of reading
-            // open file and read whole file into a buffer 
-            let mut cbcl = File::open(cbcl_path)?;
-            let mut whole_buffer = Vec::new();
-            cbcl.read_to_end(&mut whole_buffer)?;
-
             // identify first and last tile index to later get start and end byte position
             let first_idx = tile_idces[0] as usize;
-            let last_idx = tile_idces[tile_idces.len() - 1] as usize;
+            let last_idx = (tile_idces[tile_idces.len() - 1] + 1) as usize;
 
             // calculate start byte position
-            // if the first index is 0, edge case where you can't slice from 0..0, so need to have a separate condition
+            // if the first index is 0, edge case where you can't slice from 0..0,
+            // so need to have a separate condition
             let start_pos;
             if first_idx == 0 {
-                start_pos = header.header_size as usize;
+                start_pos = header.header_size as u64;
             } else {
-                start_pos = (header.header_size + &header.tile_offsets[..first_idx][3].iter().sum::<u32>()) as usize;
+                // TODO: this never worked
+                start_pos = (header.header_size + &header.tile_offsets[..first_idx][3].iter().sum::<u32>()) as u64;
             }
-            
+
             // calculate end byte position and expected size of the decompressed tile(s)
-            // if number of tiles is 1, then slicing returns a u32 instead of a vector slice, so .iter() needs to be avoided
-            let num_tiles = tile_idces.len();
-            let end_pos;
-            let expected_size;
-            if num_tiles == 1 {
-                end_pos = (header.header_size + header.tile_offsets[last_idx][3]) as usize; // index 3 is the compressed tile size 
-                expected_size = header.tile_offsets[last_idx][2] as usize; // index 2 is the uncompressed tile size
+            // if number of tiles is 1, then slicing returns a u32 instead of a vector slice,
+            // so .iter() needs to be avoided
+            let compressed_size;
+            let uncompressed_size;
+
+            if tile_idces.len() == 1 {
+                // index 2 is the uncompressed tile size
+                uncompressed_size = header.tile_offsets[first_idx][2] as usize;
+                // index 3 is the compressed tile size
+                compressed_size = header.tile_offsets[first_idx][3] as usize;
             } else {
-                end_pos = (header.header_size + header.tile_offsets[first_idx..last_idx][3].iter().sum::<u32>()) as usize; // index 3 is the compressed tile size
-                expected_size = header.tile_offsets[first_idx..last_idx][2].iter().sum::<u32>() as usize; // index 2 is the compressed tile size
+                // TODO: This code never worked
+                // index 2 is the uncompressed tile size
+                uncompressed_size = header.tile_offsets[first_idx..last_idx][2].iter().sum::<u32>() as usize;
+                // index 3 is the compressed tile size
+                compressed_size = header.tile_offsets[first_idx..last_idx][3].iter().sum::<u32>() as usize;
             }
+
+            // open file and read whole file into a buffer
+            let mut cbcl = File::open(cbcl_path)?;
+            cbcl.seek(SeekFrom::Start(start_pos))?;
+
+            let mut read_buffer = vec![0u8; compressed_size];
+            println!("compressed size is {0}", compressed_size);
+            cbcl.read_exact(&mut read_buffer)?;
+            let mut gz = MultiGzDecoder::new(&read_buffer[..]);
 
             // use MultiGzDecoder to uncompress the number of bytes summed over the offsets of all tile_idces
-            let mut uncomp_bytes = Vec::new();
-            let mut gz = MultiGzDecoder::new(&whole_buffer[start_pos..end_pos]);
-            println!("built new decoder");
-
-            gz.read_to_end(&mut uncomp_bytes).unwrap();
-            println!("finished decoding");
+            let mut uncomp_bytes = vec![0u8; uncompressed_size];
+            println!("uncompressed size is {0}", uncompressed_size);
+            gz.read_exact(&mut uncomp_bytes)?;
 
             // check that size of decompressed tiles matches the size expected
             let actual_size = uncomp_bytes.len();
-            println!("{0} {1}", actual_size, expected_size);
-            if  actual_size != expected_size {
-                panic!("Decompressed tile(s) were expected to be {0} bytes long but were {1} bytes long", expected_size, actual_size);
+            println!("{0} {1}", actual_size, uncompressed_size);
+            if  actual_size != uncompressed_size {
+                panic!("Decompressed tile(s) were expected to be {0} bytes long but were {1} bytes long", uncompressed_size, actual_size);
             }
         }
     }

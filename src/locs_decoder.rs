@@ -32,7 +32,6 @@ impl Locs {
 pub fn locs_decoder(locs_path: &Path) -> Locs {
     let f = File::open(locs_path).unwrap();
     let locs = Locs::from_reader(f).unwrap();
-    println!("{:#?}", locs);
     return locs;
 }
 
