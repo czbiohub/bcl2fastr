@@ -137,3 +137,19 @@ pub fn extract_reads(locs_path: &Path, run_info_path: &Path, lane_path: &Path, t
 
     extract_base_matrix(&headers, &cbcl_paths, tile_idces)
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_reads() {
+        let locs_path = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/s.locs");
+        let run_info_path = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/RunInfo.xml");
+        let lane_path = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/BaseCalls/L001");
+        let tile_idces = vec![0, 1];
+
+        extract_reads(locs_path, run_info_path, lane_path, tile_idces).unwrap()
+    }
+}
