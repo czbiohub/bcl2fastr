@@ -65,7 +65,6 @@ impl CBCLHeader {
 pub fn cbcl_header_decoder(cbcl_path : &Path) -> CBCLHeader {
     let f = File::open(cbcl_path).unwrap();
     let cbcl_header = CBCLHeader::from_reader(f).unwrap();
-    println!("{:#?}", cbcl_header);
     return cbcl_header;
 }
 

@@ -30,7 +30,6 @@ impl Filter {
 pub fn filter_decoder(filter_path: &Path) -> Filter {
     let f = File::open(filter_path).unwrap();
     let filter = Filter::from_reader(f).unwrap();
-    println!("{:#?}", filter);
     return filter;
 }
 
