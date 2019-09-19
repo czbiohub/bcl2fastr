@@ -38,35 +38,16 @@ fn extract_base_matrix(
             
             // identify first and last tile index to later get start and end byte position
             let first_idx = tile_idces[0] as usize;
-            let last_idx = (tile_idces[tile_idces.len() - 1] + 1) as usize;
+            let last_idx = tile_idces[tile_idces.len() - 1] as usize;
 
             // calculate start byte position
-            // if the first index is 0, edge case where you can't slice from 0..0,
-            // so need to have a separate condition
-            let start_pos;
-            if first_idx == 0 {
-                start_pos = header.header_size as u64;
-            } else {
-                start_pos = (header.header_size + header.tile_offsets[..first_idx].iter().map(|v| v[3]).sum::<u32>()) as u64;
-            }
+            let start_pos = (header.header_size + header.tile_offsets[0..first_idx].iter().map(|v| v[3]).sum::<u32>()) as u64;
 
             // calculate end byte position and expected size of the decompressed tile(s)
-            // if number of tiles is 1, then slicing returns a u32 instead of a vector slice,
-            // so .iter() needs to be avoided
-            let compressed_size;
-            let uncompressed_size;
-
-            if tile_idces.len() == 1 {
-                // index 2 is the uncompressed tile size
-                uncompressed_size = header.tile_offsets[first_idx][2] as usize;
-                // index 3 is the compressed tile size
-                compressed_size = header.tile_offsets[first_idx][3] as usize;
-            } else {
-                // index 2 is the uncompressed tile size
-                uncompressed_size = header.tile_offsets[first_idx..last_idx].iter().map(|v| v[2]).sum::<u32>() as usize;
-                // index 3 is the compressed tile size
-                compressed_size = header.tile_offsets[first_idx..last_idx].iter().map(|v| v[3]).sum::<u32>() as usize;
-            }
+            // index 2 is the uncompressed tile size
+            let uncompressed_size = header.tile_offsets[first_idx..=last_idx].iter().map(|v| v[2]).sum::<u32>() as usize;
+            // index 3 is the compressed tile size
+            let compressed_size = header.tile_offsets[first_idx..=last_idx].iter().map(|v| v[3]).sum::<u32>() as usize;
 
             // open file and read whole file into a buffer
             let mut cbcl = File::open(cbcl_path)?;
