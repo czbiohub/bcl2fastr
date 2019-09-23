@@ -19,6 +19,36 @@ use crate::cbcl_header_decoder::{
 };
 
 
+fn extract_tiles(header: &CBCLHeader, cbcl_path: &PathBuf, tile_idces: &Vec<u32>) -> std::io::Result<Vec<u8>> {
+    // identify first and last tile index to later get start and end byte position
+    let first_idx = tile_idces[0] as usize;
+    let last_idx = tile_idces[tile_idces.len() - 1] as usize;
+
+    // calculate start byte position
+    let start_pos = (header.header_size + header.tile_offsets[0..first_idx].iter().map(|v| v[3]).sum::<u32>()) as u64;
+
+    // calculate end byte position and expected size of the decompressed tile(s)
+    // index 2 is the uncompressed tile size
+    let uncompressed_size = header.tile_offsets[first_idx..=last_idx].iter().map(|v| v[2]).sum::<u32>() as usize;
+    // index 3 is the compressed tile size
+    let compressed_size = header.tile_offsets[first_idx..=last_idx].iter().map(|v| v[3]).sum::<u32>() as usize;
+
+    // open file and read whole file into a buffer
+    let mut cbcl = File::open(cbcl_path)?;
+    cbcl.seek(SeekFrom::Start(start_pos))?;
+
+    let mut read_buffer = vec![0u8; compressed_size];
+    cbcl.read_exact(&mut read_buffer)?;
+
+    // use MultiGzDecoder to uncompress the number of bytes summed over the offsets of all tile_idces
+    let mut uncomp_bytes = vec![0u8; uncompressed_size];
+    let mut gz = MultiGzDecoder::new(&read_buffer[..]);
+    gz.read_exact(&mut uncomp_bytes)?;
+
+    Ok(uncomp_bytes)
+}
+
+
 // cbcl_paths is of the shape (num_cycles, lane_parts)
 fn extract_base_matrix(
     headers : &Vec<Vec<CBCLHeader>>, cbcl_paths : &Vec<Vec<PathBuf>>, tile_idces : Vec<u32>
@@ -32,40 +62,7 @@ fn extract_base_matrix(
     for c in 0..num_cycles {
         let num_parts = cbcl_paths[c].len();
         for p in 0..num_parts {
-            // assign header and path
-            let header: &CBCLHeader = &headers[c][p];
-            let cbcl_path: &PathBuf = &cbcl_paths[c][p];
-            
-            // identify first and last tile index to later get start and end byte position
-            let first_idx = tile_idces[0] as usize;
-            let last_idx = tile_idces[tile_idces.len() - 1] as usize;
-
-            // calculate start byte position
-            let start_pos = (header.header_size + header.tile_offsets[0..first_idx].iter().map(|v| v[3]).sum::<u32>()) as u64;
-
-            // calculate end byte position and expected size of the decompressed tile(s)
-            // index 2 is the uncompressed tile size
-            let uncompressed_size = header.tile_offsets[first_idx..=last_idx].iter().map(|v| v[2]).sum::<u32>() as usize;
-            // index 3 is the compressed tile size
-            let compressed_size = header.tile_offsets[first_idx..=last_idx].iter().map(|v| v[3]).sum::<u32>() as usize;
-
-            // open file and read whole file into a buffer
-            let mut cbcl = File::open(cbcl_path)?;
-            cbcl.seek(SeekFrom::Start(start_pos))?;
-
-            let mut read_buffer = vec![0u8; compressed_size];
-            cbcl.read_exact(&mut read_buffer)?;
-
-            // use MultiGzDecoder to uncompress the number of bytes summed over the offsets of all tile_idces
-            let mut uncomp_bytes = vec![0u8; uncompressed_size];
-            let mut gz = MultiGzDecoder::new(&read_buffer[..]);
-            gz.read_exact(&mut uncomp_bytes)?;
-
-            // check that size of decompressed tiles matches the size expected
-            let actual_size = uncomp_bytes.len();
-            if  actual_size != uncompressed_size {
-                panic!("Decompressed tile(s) were expected to be {0} bytes long but were {1} bytes long", uncompressed_size, actual_size);
-            }
+            let _uncomp_bytes = extract_tiles(&headers[c][p], &cbcl_paths[c][p], &tile_idces);
         }
     }
     Ok(())
@@ -89,31 +86,32 @@ pub fn extract_reads(locs_path: &Path, run_info_path: &Path, lane_path: &Path, t
 
     let mut cbcl_paths = Vec::new(); 
     let mut headers = Vec::new();
-    let c_paths : Vec<_> = glob::glob(lane_path.join("C*").to_str().unwrap()).
-            expect("Failed to read glob pattern for C* dirs").collect();
 
-    for c_path in &c_paths {
-        let lane_part_paths : Vec<_> = glob::glob(c_path.as_ref().unwrap().join("*").to_str().unwrap()).unwrap().collect();
-
+    for c_path in glob::glob(lane_path.join("C*").to_str().unwrap()).expect(
+        "Failed to read glob pattern for C* dirs"
+    ).filter_map(Result::ok) {
         let mut lane_part_headers = Vec::new();
         let mut formatted_part_paths = Vec::new();
-        for part_path in lane_part_paths {
-            // part_path.as_ref() changes the value to be unwrapped from Option<T> to Option<&T> which doesn't assume ownership
-            lane_part_headers.push(cbcl_header_decoder(part_path.as_ref().unwrap()));
-            formatted_part_paths.push(part_path.unwrap());
+
+        for part_path in glob::glob(c_path.join("*cbcl").to_str().unwrap()).expect(
+            "Failed to read glob pattern for CBCL files"
+        ).filter_map(Result::ok) {
+            // part_path.as_ref() changes the value from T to &T which doesn't assume ownership
+            lane_part_headers.push(cbcl_header_decoder(part_path.as_ref()));
+            formatted_part_paths.push(part_path);
         }
 
         headers.push(lane_part_headers);
         cbcl_paths.push(formatted_part_paths);
     }
 
-    let filter_paths : Vec<_> = glob::glob(lane_path.join("*.filter").to_str().unwrap()).
-            expect("Failed to read glob pattern for *.filter files").collect();
-
     // read in the filter paths as filter structs (there should be one for each tile)
     let mut filters = Vec::new();
-    for filter_path in &filter_paths {
-        filters.push(filter_decoder::filter_decoder(filter_path.as_ref().unwrap()));
+
+    for filter_path in glob::glob(lane_path.join("*.filter").to_str().unwrap()).expect(
+        "Failed to read glob pattern for *.filter files"
+    ).filter_map(Result::ok) {
+        filters.push(filter_decoder::filter_decoder(&filter_path));
     }
 
     extract_base_matrix(&headers, &cbcl_paths, tile_idces)
@@ -123,6 +121,29 @@ pub fn extract_reads(locs_path: &Path, run_info_path: &Path, lane_path: &Path, t
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_extract_tiles() {
+        let cbcl_path = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/BaseCalls/L001/C1.1/L001_1.cbcl");
+        let cbclheader = cbcl_header_decoder(cbcl_path);
+        let tile_idces = vec![0, 1];
+        let expected_bytes = vec![
+            212, 254, 220, 221, 166, 108, 217, 232, 236, 221,
+            157, 216, 220, 220, 205, 222, 140, 212, 157, 254,
+            199, 221, 237, 185, 252, 199, 237, 253, 253, 68,
+            237, 205, 199, 199, 237, 109, 205, 79, 200, 220,
+            76, 253, 204, 253, 95, 223, 238, 78, 79, 206,
+            220, 152, 220, 157, 255, 196, 207, 207, 133, 78,
+            236, 222, 205, 254, 237, 204, 198, 218, 236, 204,
+            206, 204, 214, 207, 222, 204, 201, 221, 103, 207,
+            204, 196, 204, 88, 216, 205, 222, 251, 253, 206,
+            206, 237, 223, 220, 205, 76, 220, 205, 232, 220
+        ];
+
+        let uncomp_bytes = extract_tiles(&cbclheader, &cbcl_path.to_path_buf(), &tile_idces).unwrap();
+
+        assert_eq!(uncomp_bytes, expected_bytes)
+    }
 
     #[test]
     fn test_extract_reads() {

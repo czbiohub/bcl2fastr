@@ -3,6 +3,7 @@ use std::{
     path::Path,
 };
 use serde_xml_rs::from_reader;
+use serde::de::{self, Deserialize, Deserializer, Unexpected};
 
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -11,8 +12,22 @@ pub struct Read {
     pub number : u64, // parsed from run info, outputed in fastq
     #[serde(rename = "NumCycles", default)]
     pub num_cycles : u64, // number of cycles expected for one read (~100)
-    #[serde(rename = "IsIndexedRead", default)]
-    pub is_indexed_read : String,
+    #[serde(rename = "IsIndexedRead", deserialize_with = "bool_from_string")]
+    pub is_indexed_read : bool,
+}
+
+fn bool_from_string<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match String::deserialize(deserializer)?.as_ref() {
+        "Y" => Ok(true),
+        "N" => Ok(false),
+        other => Err(de::Error::invalid_value(
+            Unexpected::Str(other),
+            &"Y or N",
+        )),
+    }
 }
 
 
@@ -85,15 +100,26 @@ pub struct RunInfo {
 
 
 pub fn parse_run_info(run_info_path: &Path) -> RunInfo {
-    let run_xml = fs::read_to_string(run_info_path).expect("error reading the file");
-    let runinfo : RunInfo = from_reader(run_xml.as_bytes()).unwrap();
-    return runinfo
+    let run_xml = match fs::read_to_string(run_info_path) {
+        Err(e) => panic!(
+            "couldn't read {}: {}", run_info_path.display(), e
+        ),
+        Ok(s) => s,
+    };
+
+    let runinfo: RunInfo = match from_reader(run_xml.as_bytes()) {
+        Err(e) => panic!(
+            "Error parsing RunInfo: {}", e
+        ),
+        Ok(r) => r,
+    };
+
+    runinfo
 }
 
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]
@@ -105,34 +131,18 @@ mod tests {
                 version: 5,
                 runs: vec![
                     Run {
-                        id: "190414_A00111_0296_AHJCWWDSXX".to_string(),
+                        id: "190414_A00111_0296_AHJCWWDSXX".to_owned(),
                         number: 296,
-                        flowcell: "HJCWWDSXX".to_string(),
-                        instrument: "A00111".to_string(),
-                        date: "4/14/2019 1:17:20 PM".to_string(),
+                        flowcell: "HJCWWDSXX".to_owned(),
+                        instrument: "A00111".to_owned(),
+                        date: "4/14/2019 1:17:20 PM".to_owned(),
                         reads: vec![
                             Reads {
                                 read: vec![
-                                    Read {
-                                        number: 1,
-                                        num_cycles: 4,
-                                        is_indexed_read: "N".to_string()
-                                    },
-                                    Read {
-                                        number: 2,
-                                        num_cycles: 8,
-                                        is_indexed_read: "Y".to_string()
-                                    },
-                                    Read {
-                                        number: 3,
-                                        num_cycles: 8,
-                                        is_indexed_read: "Y".to_string()
-                                    },
-                                    Read {
-                                        number: 4,
-                                        num_cycles: 4,
-                                        is_indexed_read: "N".to_string()
-                                    }
+                                    Read { number: 1, num_cycles: 4, is_indexed_read: false },
+                                    Read { number: 2, num_cycles: 8, is_indexed_read: true },
+                                    Read { number: 3, num_cycles: 8, is_indexed_read: true },
+                                    Read { number: 4, num_cycles: 4, is_indexed_read: false }
                                 ]
                             }
                         ],
@@ -145,13 +155,13 @@ mod tests {
                                 flowcell_side: 1,
                                 tile_set: vec![
                                     TileSet {
-                                        tile_naming_convention: "FourDigit".to_string(),
+                                        tile_naming_convention: "FourDigit".to_owned(),
                                         tiles: vec![
                                             Tiles {
                                                 tile: vec![
-                                                    "1_1101".to_string(),
-                                                    "1_1102".to_string(),
-                                                    "1_1103".to_string()
+                                                    "1_1101".to_owned(),
+                                                    "1_1102".to_owned(),
+                                                    "1_1103".to_owned()
                                                 ]
                                             }
                                         ]
@@ -163,6 +173,23 @@ mod tests {
                 ]
             };
         assert_eq!(actual_runinfo, expected_runinfo)
+    }
 
+    #[test]
+    #[should_panic(
+      expected = r#"couldn't read test_data/no_RunInfo.xml: No such file or directory (os error 2)"#
+    )]
+    fn test_runinfo_no_file() {
+        let filename_info = Path::new("test_data/no_RunInfo.xml");
+        parse_run_info(filename_info);
+    }
+
+    #[test]
+    #[should_panic(
+      expected = r#"Error parsing RunInfo: 4:10 Unexpected closing tag: RunInfo, expected Run"#
+    )]
+    fn test_runinfo_bad_file() {
+        let filename_info = Path::new("test_data/bad_RunInfo.xml");
+        parse_run_info(filename_info);
     }
 }

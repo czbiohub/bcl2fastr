@@ -63,16 +63,26 @@ impl CBCLHeader {
 
 
 pub fn cbcl_header_decoder(cbcl_path : &Path) -> CBCLHeader {
-    let f = File::open(cbcl_path).unwrap();
-    let cbcl_header = CBCLHeader::from_reader(f).unwrap();
-    return cbcl_header;
-}
+    let f = match File::open(cbcl_path) {
+        Err(e) => panic!(
+            "couldn't open {}: {}", cbcl_path.display(), e
+        ),
+        Ok(file) => file,
+    };
 
+    let cbcl_header = match CBCLHeader::from_reader(f) {
+        Err(e) => panic!(
+            "Error reading header from {}: {}", cbcl_path.display(), e
+        ),
+        Ok(ch) => ch,
+    };
+
+    cbcl_header
+}
 
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]
@@ -101,5 +111,14 @@ mod tests {
                 non_pf_clusters_excluded: 0,
             };
         assert_eq!(actual_cbclheader, expected_cbclheader)
+    }
+
+    #[test]
+    #[should_panic(
+      expected = r#"couldn't open test_data/no_file.cbcl: No such file or directory (os error 2)"#
+    )]
+    fn test_cbclheader_no_file() {
+        let test_file = Path::new("test_data/no_file.cbcl");
+        cbcl_header_decoder(test_file);
     }
 }

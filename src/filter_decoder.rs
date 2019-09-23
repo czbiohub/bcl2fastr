@@ -28,9 +28,21 @@ impl Filter {
 }
 
 pub fn filter_decoder(filter_path: &Path) -> Filter {
-    let f = File::open(filter_path).unwrap();
-    let filter = Filter::from_reader(f).unwrap();
-    return filter;
+    let f = match File::open(filter_path) {
+        Err(e) => panic!(
+            "couldn't open {}: {}", filter_path.display(), e
+        ),
+        Ok(file) => file,
+    };
+
+    let filter = match Filter::from_reader(f) {
+        Err(e) => panic!(
+            "Error reading filter from {}: {}", filter_path.display(), e
+        ),
+        Ok(f) => f,
+    };
+
+    filter
 }
 
 
@@ -59,5 +71,14 @@ mod tests {
                 ],
             };
         assert_eq!(actual_filter, expected_filter);
+    }
+
+    #[test]
+    #[should_panic(
+      expected = r#"couldn't open test_data/no_file.filter: No such file or directory (os error 2)"#
+    )]
+    fn test_filter_no_file() {
+        let test_file = Path::new("test_data/no_file.filter");
+        filter_decoder(test_file);
     }
 }

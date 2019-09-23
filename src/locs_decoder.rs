@@ -30,9 +30,21 @@ impl Locs {
 
 
 pub fn locs_decoder(locs_path: &Path) -> Locs {
-    let f = File::open(locs_path).unwrap();
-    let locs = Locs::from_reader(f).unwrap();
-    return locs;
+    let f = match File::open(locs_path) {
+        Err(e) => panic!(
+            "couldn't open {}: {}", locs_path.display(), e
+        ),
+        Ok(file) => file,
+    };
+
+    let locs = match Locs::from_reader(f) {
+        Err(e) => panic!(
+            "Error reading locs from {}: {}", locs_path.display(), e
+        ),
+        Ok(locs) => locs,
+    };
+
+    locs
 }
 
 
@@ -85,5 +97,14 @@ mod tests {
                 ]
             };
         assert_eq!(actual_locs, expected_locs)
+    }
+
+    #[test]
+    #[should_panic(
+      expected = r#"couldn't open test_data/no_file.locs: No such file or directory (os error 2)"#
+    )]
+    fn test_locs_no_file() {
+        let test_file = Path::new("test_data/no_file.locs");
+        locs_decoder(test_file);
     }
 }
