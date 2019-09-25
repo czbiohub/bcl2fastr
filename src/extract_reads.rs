@@ -1,3 +1,5 @@
+//! Extract and decompress a set of tiles from a vector of cbcl files.
+
 extern crate flate2;
 extern crate glob;
 

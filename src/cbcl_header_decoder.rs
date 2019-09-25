@@ -1,3 +1,6 @@
+//! Read the header from CBCL file and decode into a struct of useful information about
+//! the file, to allow efficient tile extraction later.
+
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::{
     fs::File,
@@ -24,6 +27,23 @@ pub struct CBCLHeader {
 
 
 impl CBCLHeader {
+    /// Reads the beginning of a CBCL file and stores the header information
+    /// 
+    /// Structure of a CBCL header:
+    ///  1. `u16` for file version
+    ///  2. `u32` for header size, in bytes
+    ///  3. `u8` for number of bits per basecall (usually 2)
+    ///  4. `u8` for number of bits per quality score (usually 2)
+    ///  5. `u32` for the number of quality score bins
+    ///  6. `number_of_bins` pairs of `u32` key-value pairs for quality score bins.
+    ///     First value is key, second is lower bound on the PHRED score.
+    ///  7. `u32` for number of tiles in the file
+    ///  8. `num_tile_records` arrays of 4 `u32` values:
+    ///     1. Tile number
+    ///     2. Number of clusters in the tile
+    ///     3. Uncompressed block size
+    ///     4. Compressed block size
+    ///  9. `u8` flag for whether this file is only reads that pass quality filtering
     pub fn from_reader(cbcl_path: &Path, mut rdr: impl Read) -> io::Result<Self> {
         let version = rdr.read_u16::<LittleEndian>()?;
         let header_size = rdr.read_u32::<LittleEndian>()?;
@@ -70,6 +90,7 @@ impl CBCLHeader {
 }
 
 
+/// Decode a `.cbcl` header into a `CBCLHeader` struct or panic
 pub fn cbcl_header_decoder(cbcl_path: &Path) -> CBCLHeader {
     let f = match File::open(cbcl_path) {
         Err(e) => panic!(

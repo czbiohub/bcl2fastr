@@ -1,3 +1,6 @@
+//! bcl2fastr is a program for efficient multi-threaded demultiplexing of large
+//! sequencing runs (specifically from the NovaSeq instrument).
+
 use std::path::Path;
 
 mod run_info_parser;
@@ -6,7 +9,7 @@ mod locs_decoder;
 mod cbcl_header_decoder;
 mod extract_reads;
 
-/// Main function parses command line arguments and runs demux
+/// Parses command line arguments and runs demux
 fn main() {
     let locs_path = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/s.locs");
     let run_info_path = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/RunInfo.xml");
