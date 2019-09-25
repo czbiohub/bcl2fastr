@@ -7,6 +7,7 @@ use std::{
 
 
 #[derive(Debug, PartialEq)]
+/// Each element is an array of [x, y] locations
 pub struct Locs {
     pub locs: Vec<[f32; 2]>,
 }

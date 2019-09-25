@@ -7,6 +7,7 @@ use std::{
 
 
 #[derive(Debug, PartialEq)]
+/// Represents the header information from a CBCL file
 pub struct CBCLHeader {
     pub cbcl_path: PathBuf,
     pub version: u16,
