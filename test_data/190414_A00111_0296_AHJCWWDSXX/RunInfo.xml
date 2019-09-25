@@ -16,7 +16,7 @@
 					<Tile>1_1101</Tile>
 					<Tile>1_1102</Tile>
 					<Tile>1_1103</Tile>
-					</Tiles>
+				</Tiles>
 			</TileSet>
 		</FlowcellLayout>
 		<AlignToPhiX />

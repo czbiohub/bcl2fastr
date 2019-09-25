@@ -2,51 +2,59 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use std::{
     fs::File,
     io::{self, Read},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 
 #[derive(Debug, PartialEq)]
 pub struct CBCLHeader {
-    pub version : u16, // H
-    pub header_size : u32, // I
-    pub bits_per_basecall : u8, // B
-    pub bits_per_qscore : u8, // B
-    pub number_of_bins : u32, //I
-    pub bins : Vec<Vec<u32>>, //I
-    pub num_tile_records : u32, //I
-    pub tile_offsets : Vec<Vec<u32>>, //I [tile number, num clusters, uncompressed
-                                      // block size, compressed block size]
-    pub non_pf_clusters_excluded : u8, //B, converted from u8 to bool
+    pub cbcl_path: PathBuf,
+    pub version: u16,
+    pub header_size: u32,
+    pub bits_per_basecall: u8,
+    pub bits_per_qscore: u8,
+    pub number_of_bins: u32,
+    pub bins: Vec<[u32; 2]>,
+    pub num_tile_records: u32,
+    // [tile number, num clusters, uncompressed block size, compressed block size]
+    pub tile_offsets: Vec<[u32; 4]>,
+    pub non_pf_clusters_excluded: bool,
 }
 
 
 impl CBCLHeader {
-    pub fn from_reader(mut rdr: impl Read) -> io::Result<Self> {
+    pub fn from_reader(cbcl_path: &Path, mut rdr: impl Read) -> io::Result<Self> {
         let version = rdr.read_u16::<LittleEndian>()?;
         let header_size = rdr.read_u32::<LittleEndian>()?;
         let bits_per_basecall = rdr.read_u8()?;
         let bits_per_qscore = rdr.read_u8()?;
+
         let number_of_bins = rdr.read_u32::<LittleEndian>()?;
+        let mut bin_buffer = vec![0u32; (2 * number_of_bins) as usize];
+        rdr.read_u32_into::<LittleEndian>(&mut bin_buffer)?;
+
         let mut bins = Vec::new();
-        for _b in 0..number_of_bins {
-            let from = rdr.read_u32::<LittleEndian>()?;
-            let to = rdr.read_u32::<LittleEndian>()?;
-            bins.push(vec![from, to]);
+        for bin_chunk in bin_buffer.chunks_exact(2) {
+            let mut bin = [0u32; 2];
+            bin.clone_from_slice(bin_chunk);
+            bins.push(bin);
         }
+
         let num_tile_records = rdr.read_u32::<LittleEndian>()?;
+        let mut tile_buffer = vec![0u32; (4 * num_tile_records) as usize];
+        rdr.read_u32_into::<LittleEndian>(&mut tile_buffer)?;
+
         let mut tile_offsets = Vec::new();
-        for _t in 0..num_tile_records {
-            let tile_number = rdr.read_u32::<LittleEndian>()?;
-            let num_clusters = rdr.read_u32::<LittleEndian>()?;
-            let uncomp_block_size = rdr.read_u32::<LittleEndian>()?;
-            let comp_block_size = rdr.read_u32::<LittleEndian>()?;
-            tile_offsets.push(vec![tile_number, num_clusters, uncomp_block_size, comp_block_size]);
+        for tile_chunk in tile_buffer.chunks_exact(4) {
+            let mut tile = [0u32; 4];
+            tile.clone_from_slice(tile_chunk);
+            tile_offsets.push(tile);
         }
-        let non_pf_clusters_excluded = rdr.read_u8()?;
+        let non_pf_clusters_excluded = rdr.read_u8()? != 0;
 
 
         Ok(CBCLHeader {
+            cbcl_path: cbcl_path.to_path_buf(),
             version,
             header_size,
             bits_per_basecall,
@@ -58,11 +66,10 @@ impl CBCLHeader {
             non_pf_clusters_excluded,
         })
     }
-
 }
 
 
-pub fn cbcl_header_decoder(cbcl_path : &Path) -> CBCLHeader {
+pub fn cbcl_header_decoder(cbcl_path: &Path) -> CBCLHeader {
     let f = match File::open(cbcl_path) {
         Err(e) => panic!(
             "couldn't open {}: {}", cbcl_path.display(), e
@@ -70,7 +77,7 @@ pub fn cbcl_header_decoder(cbcl_path : &Path) -> CBCLHeader {
         Ok(file) => file,
     };
 
-    let cbcl_header = match CBCLHeader::from_reader(f) {
+    let cbcl_header = match CBCLHeader::from_reader(cbcl_path, f) {
         Err(e) => panic!(
             "Error reading header from {}: {}", cbcl_path.display(), e
         ),
@@ -87,28 +94,20 @@ mod tests {
 
     #[test]
     fn test_cbclheader() {
-        let test_file = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/BaseCalls/L001/C1.1/L001_1.cbcl");
-        let actual_cbclheader : CBCLHeader = cbcl_header_decoder(test_file);
+        let cbcl_path = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/BaseCalls/L001/C1.1/L001_1.cbcl");
+        let actual_cbclheader = cbcl_header_decoder(cbcl_path);
         let expected_cbclheader =
             CBCLHeader {
+                cbcl_path: cbcl_path.to_path_buf(),
                 version: 1,
                 header_size: 97,
                 bits_per_basecall: 2,
                 bits_per_qscore: 2,
                 number_of_bins: 4,
-                bins: vec![
-                    vec![0, 0],
-                    vec![1, 11],
-                    vec![2, 25],
-                    vec![3, 37],
-                ],
+                bins: vec![[0, 0], [1, 11], [2, 25], [3, 37]],
                 num_tile_records: 3,
-                tile_offsets: vec![
-                    vec![1101, 100, 50, 73],
-                    vec![1102, 100, 50, 73],
-                    vec![1103, 100, 50, 73],
-                ],
-                non_pf_clusters_excluded: 0,
+                tile_offsets: vec![[1101, 100, 50, 73], [1102, 100, 50, 73], [1103, 100, 50, 73]],
+                non_pf_clusters_excluded: false,
             };
         assert_eq!(actual_cbclheader, expected_cbclheader)
     }
@@ -118,7 +117,7 @@ mod tests {
       expected = r#"couldn't open test_data/no_file.cbcl: No such file or directory (os error 2)"#
     )]
     fn test_cbclheader_no_file() {
-        let test_file = Path::new("test_data/no_file.cbcl");
-        cbcl_header_decoder(test_file);
+        let cbcl_path = Path::new("test_data/no_file.cbcl");
+        cbcl_header_decoder(cbcl_path);
     }
 }
