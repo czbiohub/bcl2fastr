@@ -9,7 +9,7 @@
 
  - Build the docs:
 
-   `docker run -v `pwd`:/usr/src/bcl2fastr --rm --name bcl2fastr-dev bcl2fastr-dev cargo doc --document-private-items`
+   ```docker run -v `pwd`:/usr/src/bcl2fastr --rm --name bcl2fastr-dev bcl2fastr-dev cargo doc --document-private-items```
 
  - Develop:
 
