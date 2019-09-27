@@ -1,3 +1,5 @@
+//! Read `*.filter` files into vectors of boolean values.
+
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::{
     fs::File,
@@ -7,11 +9,19 @@ use std::{
 
 
 #[derive(Debug, PartialEq)]
+/// A filter is a vector of booleans representing whether each cluster
+/// in a tile has passed quality filtering.
 pub struct Filter {
     pub bin_mask: Vec<bool>
 }
 
 impl Filter {
+    /// Creates a `Filter` struct from a file reader
+    /// 
+    /// Format of a `.filter` file:
+    ///  1. Two `u32` containing header info (ignored)
+    ///  2. `u32` representing the number of clusters
+    ///  3. `[u8; num_clusters]` of true/false (1 or 0) values
     fn from_reader(mut rdr: impl Read) -> io::Result<Self> {
         let _ = rdr.read_u64::<LittleEndian>()?;
         let num_clusters = rdr.read_u32::<LittleEndian>()? as usize;
@@ -25,6 +35,8 @@ impl Filter {
     }
 }
 
+
+/// Decode a `.filter` file into a `Filter` struct or panic
 pub fn filter_decoder(filter_path: &Path) -> Filter {
     let f = match File::open(filter_path) {
         Err(e) => panic!(

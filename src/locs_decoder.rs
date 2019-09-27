@@ -1,3 +1,5 @@
+//! Reads `*.locs` files into vectors of float arrays
+
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::{
     fs::File,
@@ -7,12 +9,19 @@ use std::{
 
 
 #[derive(Debug, PartialEq)]
+/// Each element is an array of [x, y] locations, one for each cluster in a tile
 pub struct Locs {
     pub locs: Vec<[f32; 2]>,
 }
 
 
 impl Locs {
+    /// Creates a `Locs` struct from a file reader
+    /// 
+    /// Format of a `.locs` file: 
+    ///  1. Two `u32` containing header info (ignored)
+    ///  2. `u32` representing number of clusters (locations)
+    ///  3. `[f32; 2 * num_clusters]` of [x, y] pairs
     fn from_reader(mut rdr: impl Read) -> io::Result<Self> {
         let _ = rdr.read_u64::<LittleEndian>()?;
         let num_clusters = rdr.read_u32::<LittleEndian>()? as usize;
@@ -32,6 +41,7 @@ impl Locs {
 }
 
 
+/// Decode a `.locs` file into a `Locs` struct or panic
 pub fn locs_decoder(locs_path: &Path) -> Locs {
     let f = match File::open(locs_path) {
         Err(e) => panic!(

@@ -7,6 +7,10 @@
 
    `docker build --tag=bcl2fastr-dev . # in bcl2fastr top directory`
 
+ - Build the docs:
+
+   `docker run -v <your local bcl2fastr path>:/usr/src/bcl2fastr --rm --name bcl2fastr-dev bcl2fastr-dev cargo doc --document-private-items`
+
  - Develop:
 
    `docker run -it -v <your local bcl2fastr path>:/usr/src/bcl2fastr --rm --name bcl2fastr-dev bcl2fastr-dev`

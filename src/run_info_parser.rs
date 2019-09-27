@@ -1,3 +1,6 @@
+//! Deserializes the `RunInfo.xml` file from a NovaSeq run into a useful struct
+//! of information about the sequencing run.
+
 use std::{
     fs,
     path::Path,
@@ -99,6 +102,7 @@ pub struct Tiles {
 }
 
 
+/// Parse a `RunInfo.xml` file into a `RunInfo` struct or panic
 pub fn parse_run_info(run_info_path: &Path) -> RunInfo {
     let run_xml = match fs::read_to_string(run_info_path) {
         Err(e) => panic!(
