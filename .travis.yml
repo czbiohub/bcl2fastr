@@ -1,9 +1,19 @@
 language: rust
-cache: cargo
 dist: xenial
 sudo: true
-
 os: linux
+
+# source: https://levans.fr/rust_travis_cache.html
+# Need to cache the whole `.cargo` directory to keep .crates.toml for
+# cargo-update to work
+cache:
+  directories:
+    - /home/travis/.cargo
+
+# But don't cache the cargo registry
+before_cache:
+  - rm -rf /home/travis/.cargo/registry
+
 addons:
   apt:
     packages:
@@ -28,7 +38,10 @@ matrix:
 before_install:
   - sudo apt-get update
 
-
+script:
+  - cargo build --verbose --all
+  - cargo test --verbose --all
+  
 after_success:
   - |
     if [[ "$TRAVIS_OS_NAME" == "linux" && "$TRAVIS_RUST_VERSION" == "stable" ]]; then
