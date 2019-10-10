@@ -44,7 +44,6 @@ before_install:
   - sudo apt-get update
 
 script:
-  - cargo clean
   - cargo build --verbose --all
   - cargo test --verbose --all
   
