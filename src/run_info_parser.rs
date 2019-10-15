@@ -103,13 +103,8 @@ pub struct Tiles {
 
 
 /// Parse a `RunInfo.xml` file into a `RunInfo` struct or panic
-pub fn parse_run_info(run_info_path: &Path) -> RunInfo {
-    let run_xml = match fs::read_to_string(run_info_path) {
-        Err(e) => panic!(
-            "couldn't read {}: {}", run_info_path.display(), e
-        ),
-        Ok(s) => s,
-    };
+pub fn parse_run_info(run_info_path: &Path) -> std::io::Result<RunInfo> {
+    let run_xml = fs::read_to_string(run_info_path)?;
 
     let runinfo: RunInfo = match from_reader(run_xml.as_bytes()) {
         Err(e) => panic!(
@@ -118,7 +113,7 @@ pub fn parse_run_info(run_info_path: &Path) -> RunInfo {
         Ok(r) => r,
     };
 
-    runinfo
+    Ok(runinfo)
 }
 
 
@@ -127,9 +122,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_runinfo() {
+    fn parse() {
         let filename_info = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/RunInfo.xml");
-        let actual_runinfo = parse_run_info(filename_info);
+        let actual_runinfo = parse_run_info(filename_info).unwrap();
         let expected_runinfo =
             RunInfo {
                 version: 5,
@@ -171,19 +166,37 @@ mod tests {
 
     #[test]
     #[should_panic(
-      expected = r#"couldn't read test_data/no_RunInfo.xml: No such file or directory (os error 2)"#
+      expected = r#"No such file or directory"#
     )]
-    fn test_runinfo_no_file() {
+    fn no_file() {
         let filename_info = Path::new("test_data/no_RunInfo.xml");
-        parse_run_info(filename_info);
+        parse_run_info(filename_info).unwrap();
     }
 
     #[test]
     #[should_panic(
-      expected = r#"Error parsing RunInfo: 4:10 Unexpected closing tag: RunInfo, expected Run"#
+      expected = r#"invalid value: string "Q", expected Y or N"#
     )]
-    fn test_runinfo_bad_file() {
+    fn weird_file() {
+        let filename_info = Path::new("test_data/weird_RunInfo.xml");
+        parse_run_info(filename_info).unwrap();
+    }
+
+    #[test]
+    #[should_panic(
+      expected = r#"4:10 Unexpected closing tag: RunInfo, expected Run"#
+    )]
+    fn bad_file() {
         let filename_info = Path::new("test_data/bad_RunInfo.xml");
-        parse_run_info(filename_info);
+        parse_run_info(filename_info).unwrap();
+    }
+
+    #[test]
+    #[should_panic(
+      expected = r#"1:1 Unexpected end of stream: no root element found"#
+    )]
+    fn empty_file() {
+        let filename_info = Path::new("test_data/empty_file");
+        parse_run_info(filename_info).unwrap();
     }
 }

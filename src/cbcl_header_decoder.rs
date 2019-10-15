@@ -91,22 +91,12 @@ impl CBCLHeader {
 
 
 /// Decode a `.cbcl` header into a `CBCLHeader` struct or panic
-pub fn cbcl_header_decoder(cbcl_path: &Path) -> CBCLHeader {
-    let f = match File::open(cbcl_path) {
-        Err(e) => panic!(
-            "couldn't open {}: {}", cbcl_path.display(), e
-        ),
-        Ok(file) => file,
-    };
+pub fn cbcl_header_decoder(cbcl_path: &Path) -> std::io::Result<CBCLHeader> {
+    let f = File::open(cbcl_path)?;
 
-    let cbcl_header = match CBCLHeader::from_reader(cbcl_path, f) {
-        Err(e) => panic!(
-            "Error reading header from {}: {}", cbcl_path.display(), e
-        ),
-        Ok(ch) => ch,
-    };
+    let cbcl_header = CBCLHeader::from_reader(cbcl_path, f)?;
 
-    cbcl_header
+    Ok(cbcl_header)
 }
 
 
@@ -115,9 +105,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_cbclheader() {
+    fn decode() {
         let cbcl_path = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/BaseCalls/L001/C1.1/L001_1.cbcl");
-        let actual_cbclheader = cbcl_header_decoder(cbcl_path);
+        let actual_cbclheader = cbcl_header_decoder(cbcl_path).unwrap();
         let expected_cbclheader =
             CBCLHeader {
                 cbcl_path: cbcl_path.to_path_buf(),
@@ -136,10 +126,19 @@ mod tests {
 
     #[test]
     #[should_panic(
-      expected = r#"couldn't open test_data/no_file.cbcl: No such file or directory (os error 2)"#
+      expected = r#"No such file or directory"#
     )]
-    fn test_cbclheader_no_file() {
+    fn no_file() {
         let cbcl_path = Path::new("test_data/no_file.cbcl");
-        cbcl_header_decoder(cbcl_path);
+        cbcl_header_decoder(cbcl_path).unwrap();
+    }
+
+    #[test]
+    #[should_panic(
+      expected = r#"failed to fill whole buffer"#
+    )]
+    fn bad_file() {
+        let cbcl_path = Path::new("test_data/bad_data_8.bin");
+        cbcl_header_decoder(cbcl_path).unwrap();
     }
 }

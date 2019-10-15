@@ -3,56 +3,35 @@
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::{
     fs::File,
-    io::{self, Read},
+    io::Read,
     path::Path,
 };
 
 
-#[derive(Debug, PartialEq)]
 /// A filter is a vector of booleans representing whether each cluster
 /// in a tile has passed quality filtering.
-pub struct Filter {
-    pub bin_mask: Vec<bool>
-}
-
-impl Filter {
-    /// Creates a `Filter` struct from a file reader
-    /// 
-    /// Format of a `.filter` file:
-    ///  1. Two `u32` containing header info (ignored)
-    ///  2. `u32` representing the number of clusters
-    ///  3. `[u8; num_clusters]` of true/false (1 or 0) values
-    fn from_reader(mut rdr: impl Read) -> io::Result<Self> {
-        let _ = rdr.read_u64::<LittleEndian>()?;
-        let num_clusters = rdr.read_u32::<LittleEndian>()? as usize;
-        let mut bin_mask = vec![0u8; num_clusters];
-        rdr.read_exact(&mut bin_mask)?;
-        let bin_mask = bin_mask.into_iter().map(|x| x != 0).collect();
-
-        Ok(Filter {
-            bin_mask,
-        })
-    }
-}
+pub type Filter = Vec<bool>;
 
 
 /// Decode a `.filter` file into a `Filter` struct or panic
-pub fn filter_decoder(filter_path: &Path) -> Filter {
-    let f = match File::open(filter_path) {
-        Err(e) => panic!(
-            "couldn't open {}: {}", filter_path.display(), e
-        ),
-        Ok(file) => file,
-    };
+/// 
+/// Format of a `.filter` file:
+///  1. Two `u32` containing header info (ignored)
+///  2. `u32` representing the number of clusters
+///  3. `[u8; num_clusters]` of true/false (1 or 0) values
+pub fn filter_decoder(filter_path: &Path) -> std::io::Result<Filter> {
+    let mut rdr = File::open(filter_path)?;
 
-    let filter = match Filter::from_reader(f) {
-        Err(e) => panic!(
-            "Error reading filter from {}: {}", filter_path.display(), e
-        ),
-        Ok(f) => f,
-    };
+    let _ = rdr.read_u64::<LittleEndian>()?;
 
-    filter
+    let num_clusters = rdr.read_u32::<LittleEndian>()? as usize;
+
+    let mut bin_mask = vec![0u8; num_clusters];
+    rdr.read_exact(&mut bin_mask)?;
+
+    let filter = bin_mask.into_iter().map(|x| x != 0).collect();
+
+    Ok(filter)
 }
 
 
@@ -61,33 +40,57 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_filter() {
+    fn decode() {
         let test_file = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/BaseCalls/L001/s_1_1101.filter");
-        let actual_filter = filter_decoder(test_file);
-        let expected_filter =
-            Filter {
-                bin_mask: vec![
-                    false, false, false, true, true, true, true, true, false, false,
-                    true, false, true, true, true, true, true, true, true, true,
-                    true, false, true, true, true, true, true, true, true, true,
-                    true, true, true, true, true, true, true, true, true, true,
-                    false, true, true, true, true, true, true, true, true, true,
-                    false, true, true, true, true, true, true, true, true, false,
-                    true, true, true, true, false, true, true, true, true, true,
-                    true, false, true, true, true, false, false, true, true, true,
-                    true, false, true, true, true, true, true, true, true, false,
-                    true, true, false, false, true, true, true, false, false, false,
-                ],
-            };
+        let actual_filter = filter_decoder(test_file).unwrap();
+        let expected_filter = vec![
+            false, false, false, true, true, true, true, true, false, false,
+            true, false, true, true, true, true, true, true, true, true,
+            true, false, true, true, true, true, true, true, true, true,
+            true, true, true, true, true, true, true, true, true, true,
+            false, true, true, true, true, true, true, true, true, true,
+            false, true, true, true, true, true, true, true, true, false,
+            true, true, true, true, false, true, true, true, true, true,
+            true, false, true, true, true, false, false, true, true, true,
+            true, false, true, true, true, true, true, true, true, false,
+            true, true, false, false, true, true, true, false, false, false,
+        ];
         assert_eq!(actual_filter, expected_filter);
     }
 
     #[test]
     #[should_panic(
-      expected = r#"couldn't open test_data/no_file.filter: No such file or directory (os error 2)"#
+      expected = r#"No such file or directory"#
     )]
-    fn test_filter_no_file() {
+    fn no_file() {
         let test_file = Path::new("test_data/no_file.filter");
-        filter_decoder(test_file);
+        filter_decoder(test_file).unwrap();
+    }
+
+    #[test]
+    #[should_panic(
+      expected = r#"failed to fill whole buffer"#
+    )]
+    fn empty_file() {
+        let test_file = Path::new("test_data/empty_file");
+        filter_decoder(test_file).unwrap();
+    }
+
+    #[test]
+    #[should_panic(
+      expected = r#"failed to fill whole buffer"#
+    )]
+    fn bad_8_bytes() {
+        let test_file = Path::new("test_data/bad_data_8.bin");
+        filter_decoder(test_file).unwrap();
+    }
+
+    #[test]
+    #[should_panic(
+      expected = r#"failed to fill whole buffer"#
+    )]
+    fn bad_12_bytes() {
+        let test_file = Path::new("test_data/bad_data_12.bin");
+        filter_decoder(test_file).unwrap();
     }
 }

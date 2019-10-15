@@ -1,37 +1,55 @@
 //! Extract and decompress a set of tiles from a vector of cbcl files.
 
 extern crate flate2;
-extern crate glob;
+extern crate ndarray;
 
 use std::{
     fs::File,
     io::prelude::*,
     io::SeekFrom,
-    path::Path,
 };
 use flate2::read::MultiGzDecoder;
 
-use crate::run_info_parser;
-use crate::filter_decoder;
-use crate::locs_decoder;
-use crate::cbcl_header_decoder::{
-    cbcl_header_decoder,
-    CBCLHeader,
-};
+use crate::cbcl_header_decoder::CBCLHeader;
+use crate::filter_decoder::Filter;
+use crate::novaseq_run::NovaSeqRun;
 
 
-fn extract_tiles(header: &CBCLHeader, tile_idces: (usize, usize)) -> std::io::Result<Vec<u8>> {
-    // identify first and last tile index to later get start and end byte position
-    let (first_idx, last_idx) = tile_idces;
+/// unpacks a single byte into four 2-bit integers
+fn unpack_byte(b: &u8) -> Vec<(u8, u8)> {
+    let q_1 = (b >> 6) & 3u8;
+    let b_1 = (b >> 4) & 3u8;
+    let q_2 = (b >> 2) & 3u8;
+    let b_2 = b & 3u8;
 
+    vec![(b_2, q_2), (b_1, q_1)]
+}
+
+
+/// extract multiple tiles from a CBCL file and return decompressed bytes
+fn extract_tiles(
+    header: &CBCLHeader, first_idx: usize, last_idx: usize
+) -> std::io::Result<Vec<u8>> {
     // calculate start byte position
-    let start_pos = (header.header_size + header.tile_offsets[0..first_idx].iter().map(|v| v[3]).sum::<u32>()) as u64;
+    let start_pos = (
+        header.header_size 
+        + header.tile_offsets[0..first_idx]
+                .iter()
+                .map(|v| v[3])
+                .sum::<u32>()
+    ) as u64;
 
     // calculate end byte position and expected size of the decompressed tile(s)
     // index 2 is the uncompressed tile size
-    let uncompressed_size = header.tile_offsets[first_idx..=last_idx].iter().map(|v| v[2]).sum::<u32>() as usize;
+    let uncompressed_size = header.tile_offsets[first_idx..last_idx]
+                                  .iter()
+                                  .map(|v| v[2])
+                                  .sum::<u32>() as usize;
     // index 3 is the compressed tile size
-    let compressed_size = header.tile_offsets[first_idx..=last_idx].iter().map(|v| v[3]).sum::<u32>() as usize;
+    let compressed_size = header.tile_offsets[first_idx..last_idx]
+                                .iter()
+                                .map(|v| v[3])
+                                .sum::<u32>() as usize;
 
     // open file and read whole file into a buffer
     let mut cbcl = File::open(&header.cbcl_path)?;
@@ -40,7 +58,8 @@ fn extract_tiles(header: &CBCLHeader, tile_idces: (usize, usize)) -> std::io::Re
     let mut read_buffer = vec![0u8; compressed_size];
     cbcl.read_exact(&mut read_buffer)?;
 
-    // use MultiGzDecoder to uncompress the number of bytes summed over the offsets of all tile_idces
+    // use MultiGzDecoder to uncompress the number of bytes summed 
+    // over the offsets of all tile_idces
     let mut uncomp_bytes = vec![0u8; uncompressed_size];
     let mut gz = MultiGzDecoder::new(&read_buffer[..]);
     gz.read_exact(&mut uncomp_bytes)?;
@@ -49,72 +68,123 @@ fn extract_tiles(header: &CBCLHeader, tile_idces: (usize, usize)) -> std::io::Re
 }
 
 
-// cbcl_paths is of the shape (num_cycles, lane_parts)
-fn extract_base_matrix(
-    headers: &Vec<Vec<CBCLHeader>>, tile_idces: (usize, usize)
-) -> std::io::Result<()> {
-    // iterate through the cbcl_paths by cycle and then by lane part
-    let num_cycles = headers.len();
-    for c in 0..num_cycles {
-        let num_parts = headers[c].len();
-        for p in 0..num_parts {
-            let _uncomp_bytes = extract_tiles(&headers[c][p], tile_idces);
-        }
-    }
-    Ok(())
+/// given a CBCL file and some tiles: extract, translate and filter the bases+scores
+fn process_tiles(
+    header: &CBCLHeader, filter: &Filter, first_idx: usize, last_idx: usize
+) -> std::io::Result<Vec<(u8, u8)>> {
+    let uncomp_bytes = extract_tiles(header, first_idx, last_idx)?;
+
+    // unpack the bytes into tuples (two per byte), then use the filter to filter 
+    let bq_pairs = uncomp_bytes.iter()
+                               .map(|v| unpack_byte(v))
+                               .flatten()
+                               .zip(filter)
+                               .filter_map(|v| if *v.1 { Some(v.0) } else { None })
+                               .collect();
+
+    Ok(bq_pairs)
 }
 
 
-// extracts the reads for a particular lane and is then able to pass those into processes
+/// Create arrays of read and qscore values from a set of tiles
 pub fn extract_reads(
-    locs_path: &Path, run_info_path: &Path, lane_path: &Path, tile_idces: (usize, usize)
-) -> std::io::Result<()> {
+    headers: &Vec<CBCLHeader>, filters: &Vec<Filter>, first_idx: usize, last_idx: usize
+) -> std::io::Result<(ndarray::Array2<u8>, ndarray::Array2<u8>)> {
+    // TODO: calculate filters in startup
 
-    // read in metadata for the run: locs path, run info path, run params paths
-    let _locs = locs_decoder::locs_decoder(locs_path);
-    let _run_info = run_info_parser::parse_run_info(run_info_path);
+    // when the tiles are not filtered, we need a combined filter for
+    // all of the tiles being extracted
+    let combined_filter: Vec<bool> = filters[first_idx..last_idx].iter()
+                                                                 .cloned()
+                                                                 .flatten()
+                                                                 .collect();
 
-    // read in metadata for the lane: cbcl headers, filters:
-    // read in cbcl and filter paths using glob
+    // when the tiles are already filtered, we need to take into account
+    // any half-packed bytes at the end
+    let mut ex_filter = Vec::new();
 
-    let mut headers = Vec::new();
-
-    for c_path in glob::glob(lane_path.join("C*").to_str().unwrap()).expect(
-        "Failed to read glob pattern for C* dirs"
-    ).filter_map(Result::ok) {
-        let mut lane_part_headers = Vec::new();
-
-        for part_path in glob::glob(c_path.join("*cbcl").to_str().unwrap()).expect(
-            "Failed to read glob pattern for CBCL files"
-        ).filter_map(Result::ok) {
-            lane_part_headers.push(cbcl_header_decoder(&part_path));
+    for filter in filters[first_idx..last_idx].iter() {
+        let n_pf = filter.iter().map(|&b| if b { 1 } else { 0 }).sum::<u64>();
+        ex_filter.append(&mut vec![true; n_pf as usize]);
+        if n_pf % 2 == 1 {
+            ex_filter.push(false)
         }
-
-        headers.push(lane_part_headers);
     }
 
-    // read in the filter paths as filter structs (there should be one for each tile)
-    let mut filters = Vec::new();
+    let n_pf = ex_filter.iter().map(|&b| if b { 1 } else { 0 }).sum::<u64>() as usize;
+    let n_cycles = headers.len();
+    let mut read_array = ndarray::Array2::from_elem((n_cycles, n_pf), 4u8);
+    let mut qscore_array = ndarray::Array2::from_elem((n_cycles, n_pf), 4u8);
 
-    for filter_path in glob::glob(lane_path.join("*.filter").to_str().unwrap()).expect(
-        "Failed to read glob pattern for *.filter files"
-    ).filter_map(Result::ok) {
-        filters.push(filter_decoder::filter_decoder(&filter_path));
+    for (i, h) in headers.iter().enumerate() {
+        let mut read_row = read_array.index_axis_mut(ndarray::Axis(0), i);
+        let mut qscore_row = qscore_array.index_axis_mut(ndarray::Axis(0), i);
+
+        if h.non_pf_clusters_excluded {
+            if let Ok(tile_bytes) = process_tiles(
+                &h, &ex_filter, first_idx, last_idx
+            ) {
+                let (b_array, q_array): (Vec<u8>, Vec<u8>) = tile_bytes.iter()
+                                                                       .cloned()
+                                                                       .unzip();
+                read_row.assign(&ndarray::ArrayView::from(&b_array));
+                qscore_row.assign(&ndarray::ArrayView::from(&q_array));
+            };
+        } else {
+            if let Ok(tile_bytes) = process_tiles(
+                &h, &combined_filter, first_idx, last_idx
+            ) {
+                let (b_array, q_array): (Vec<u8>, Vec<u8>) = tile_bytes.iter()
+                                                                       .cloned()
+                                                                       .unzip();
+                read_row.assign(&ndarray::ArrayView::from(&b_array));
+                qscore_row.assign(&ndarray::ArrayView::from(&q_array));
+            };
+        }
     }
 
-    extract_base_matrix(&headers, tile_idces)
+    Ok((read_array, qscore_array))
+}
+
+
+/// Iterate through all lanes and surfaces of a run and extract tiles in chunks
+pub fn extract_samples(
+    novaseq_run: NovaSeqRun, tile_chunk: usize
+) -> Result<(), &'static str> {
+    for lane in 1..=novaseq_run.run_info.runs.flow_cell_layout.lane_count {
+        for surface in 1..=novaseq_run.run_info.runs.flow_cell_layout.surface_count {
+            let headers = novaseq_run.headers.get(&(lane, surface)).unwrap();
+            let filters = novaseq_run.filters.get(&(lane, surface)).unwrap();
+
+            let n_tiles = headers[0].tile_offsets.len();
+
+            for first_idx in (0..n_tiles).step_by(tile_chunk) {
+                let last_idx = std::cmp::min(first_idx + tile_chunk, n_tiles);
+
+                let res = extract_reads(&headers, &filters, first_idx, last_idx);
+                println!("extracted some reads! {:?}", res);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    use crate::cbcl_header_decoder::cbcl_header_decoder;
 
     #[test]
-    fn test_extract_tiles() {
-        let cbcl_path = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/BaseCalls/L001/C1.1/L001_1.cbcl");
-        let cbcl_header = cbcl_header_decoder(cbcl_path);
-        let tile_idces = (0, 1);
+    fn extract_tiles() {
+        let cbcl_path = PathBuf::from("test_data/190414_A00111_0296_AHJCWWDSXX").join(
+            "Data/Intensities/BaseCalls/L001/C1.1/L001_1.cbcl"
+        );
+        let cbcl_header = cbcl_header_decoder(&cbcl_path).unwrap();
+
         let expected_bytes = vec![
             212, 254, 220, 221, 166, 108, 217, 232, 236, 221,
             157, 216, 220, 220, 205, 222, 140, 212, 157, 254,
@@ -128,18 +198,44 @@ mod tests {
             206, 237, 223, 220, 205, 76, 220, 205, 232, 220
         ];
 
-        let uncomp_bytes = extract_tiles(&cbcl_header, tile_idces).unwrap();
+        let uncomp_bytes = super::extract_tiles(&cbcl_header, 0, 2).unwrap();
 
         assert_eq!(uncomp_bytes, expected_bytes)
     }
 
     #[test]
-    fn test_extract_reads() {
-        let locs_path = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/s.locs");
-        let run_info_path = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/RunInfo.xml");
-        let lane_path = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/BaseCalls/L001");
-        let tile_idces = (0, 1);
+    fn process_tiles() {
+        let run_path = PathBuf::from("test_data/190414_A00111_0296_AHJCWWDSXX");
+        let novaseq_run = NovaSeqRun::read_path(run_path).unwrap();
+        let first_idx = 0;
+        let last_idx = 1;
 
-        extract_reads(locs_path, run_info_path, lane_path, tile_idces).unwrap()
+        let expected_bq_pairs = vec![
+            (3, 3), (0, 3), (1, 3), (1, 3), (1, 3), (0, 3), (1, 2), (1, 3)
+        ];
+
+        let header = &novaseq_run.headers.get(&(1, 1)).unwrap()[0];
+        let combined_filter = novaseq_run.filters.get(&(1, 1))
+                                                 .unwrap()[first_idx..last_idx]
+                                                 .iter()
+                                                 .cloned()
+                                                 .flatten()
+                                                 .collect();
+
+        let bq_pairs: Vec<(u8, u8)> = super::process_tiles(
+            header,
+            &combined_filter,
+            0, 1,
+        ).unwrap().into_iter().take(8).collect();
+
+        assert_eq!(bq_pairs, expected_bq_pairs)
+    }
+
+    #[test]
+    fn extract_samples() {
+        let run_path = PathBuf::from("test_data/190414_A00111_0296_AHJCWWDSXX");
+        let novaseq_run = NovaSeqRun::read_path(run_path).unwrap();
+
+        super::extract_samples(novaseq_run, 2).unwrap()
     }
 }
