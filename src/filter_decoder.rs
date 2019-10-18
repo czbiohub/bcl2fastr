@@ -1,6 +1,8 @@
 //! Read `*.filter` files into vectors of boolean values.
 
 use byteorder::{LittleEndian, ReadBytesExt};
+use bitvec::prelude as bv;
+
 use std::{
     fs::File,
     io::Read,
@@ -10,7 +12,7 @@ use std::{
 
 /// A filter is a vector of booleans representing whether each cluster
 /// in a tile has passed quality filtering.
-pub type Filter = Vec<bool>;
+pub type Filter = bv::BitVec;
 
 
 /// Decode a `.filter` file into a `Filter` struct or panic
@@ -38,22 +40,18 @@ pub fn filter_decoder(filter_path: &Path) -> std::io::Result<Filter> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bitvec::prelude::bitvec;
 
     #[test]
     fn decode() {
         let test_file = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/BaseCalls/L001/s_1_1101.filter");
         let actual_filter = filter_decoder(test_file).unwrap();
-        let expected_filter = vec![
-            false, false, false, true, true, true, true, true, false, false,
-            true, false, true, true, true, true, true, true, true, true,
-            true, false, true, true, true, true, true, true, true, true,
-            true, true, true, true, true, true, true, true, true, true,
-            false, true, true, true, true, true, true, true, true, true,
-            false, true, true, true, true, true, true, true, true, false,
-            true, true, true, true, false, true, true, true, true, true,
-            true, false, true, true, true, false, false, true, true, true,
-            true, false, true, true, true, true, true, true, true, false,
-            true, true, false, false, true, true, true, false, false, false,
+        let expected_filter = bitvec![
+            0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+            1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 1, 1,
+            1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0,
         ];
         assert_eq!(actual_filter, expected_filter);
     }

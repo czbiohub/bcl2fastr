@@ -48,21 +48,15 @@ fn main() {
 
     let run_path = PathBuf::from(matches.value_of("run-path").unwrap());
     let _samplesheet = matches.value_of("samplesheet").unwrap();
-    let _output = matches.value_of("output").unwrap();
+    let output = matches.value_of("output").unwrap();
     let _threads = value_t!(matches, "threads", u32).unwrap_or_else(|e| e.exit());
     let tile_chunk = value_t!(matches, "tile-chunk", usize).unwrap_or_else(|e| e.exit());
+    let _split_lanes = matches.is_present("split-lanes");
 
-    if matches.is_present("split-lanes") {
-        // place holder for future directives
-        println!("split-lane flag is on");
-    } else {
-        println!("split-lane flag is off");
-    }
-
-    let novaseq_run = match novaseq_run::NovaSeqRun::read_path(run_path) {
+    let novaseq_run = match novaseq_run::NovaSeqRun::read_path(run_path, tile_chunk) {
         Ok(n_run) => n_run,
         Err(e) => panic!("Error reading NovaSeq run: {}", e),
     };
 
-    extract_reads::extract_samples(novaseq_run, tile_chunk).unwrap();
+    extract_reads::extract_samples(novaseq_run, PathBuf::from(output)).unwrap();
 }

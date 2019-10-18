@@ -18,11 +18,13 @@ pub struct CBCLHeader {
     pub bits_per_basecall: u8,
     pub bits_per_qscore: u8,
     pub number_of_bins: u32,
-    pub bins: Vec<[u32; 2]>,
+    pub bins: Vec<[u8; 2]>,
     pub num_tile_records: u32,
-    // [tile number, num clusters, uncompressed block size, compressed block size]
-    pub tile_offsets: Vec<[u32; 4]>,
+    pub tiles: Vec<u32>,
     pub non_pf_clusters_excluded: bool,
+    pub start_pos: Vec<u64>,
+    pub uncompressed_size: Vec<usize>,
+    pub compressed_size: Vec<usize>,
 }
 
 
@@ -43,36 +45,54 @@ impl CBCLHeader {
     ///     2. Number of clusters in the tile
     ///     3. Uncompressed block size
     ///     4. Compressed block size
+    ///     
+    ///     Note: we only store the tile number, and compute chunked block sizes
     ///  9. `u8` flag for whether this file is only reads that pass quality filtering
-    pub fn from_reader(cbcl_path: &Path, mut rdr: impl Read) -> io::Result<Self> {
+    pub fn from_reader(
+        cbcl_path: &Path, mut rdr: impl Read, tile_chunk: usize
+    ) -> io::Result<Self> {
         let version = rdr.read_u16::<LittleEndian>()?;
         let header_size = rdr.read_u32::<LittleEndian>()?;
         let bits_per_basecall = rdr.read_u8()?;
         let bits_per_qscore = rdr.read_u8()?;
 
+        assert_eq!(bits_per_basecall, 2);
+        assert_eq!(bits_per_qscore, 2);
+
         let number_of_bins = rdr.read_u32::<LittleEndian>()?;
         let mut bin_buffer = vec![0u32; (2 * number_of_bins) as usize];
         rdr.read_u32_into::<LittleEndian>(&mut bin_buffer)?;
 
-        let mut bins = Vec::new();
-        for bin_chunk in bin_buffer.chunks_exact(2) {
-            let mut bin = [0u32; 2];
-            bin.clone_from_slice(bin_chunk);
-            bins.push(bin);
-        }
+        let bins = bin_buffer.chunks_exact(2)
+                             .map(|bc| [bc[0] as u8, bc[1].max(2) as u8 + 33])
+                             .collect();
 
         let num_tile_records = rdr.read_u32::<LittleEndian>()?;
         let mut tile_buffer = vec![0u32; (4 * num_tile_records) as usize];
         rdr.read_u32_into::<LittleEndian>(&mut tile_buffer)?;
 
-        let mut tile_offsets = Vec::new();
-        for tile_chunk in tile_buffer.chunks_exact(4) {
-            let mut tile = [0u32; 4];
-            tile.clone_from_slice(tile_chunk);
-            tile_offsets.push(tile);
-        }
+        let tile_offsets: Vec<[u32; 4]> = tile_buffer.chunks_exact(4)
+                                                     .map(|tc| [tc[0], tc[1], tc[2], tc[3]])
+                                                     .collect();
+
         let non_pf_clusters_excluded = rdr.read_u8()? != 0;
 
+        let tiles: Vec<u32> = tile_offsets.iter().map(|t| t[0]).collect();
+
+        let start_pos = tile_offsets.iter().scan(
+            header_size,
+            |pos, &t| {
+                *pos += t[3];
+                Some(*pos - t[3])
+            }
+        ).step_by(tile_chunk).map(|v| v as u64).collect();
+
+        let uncompressed_size: Vec<usize> = tile_offsets.chunks(tile_chunk)
+                                                        .map(|c| c.iter().map(|v| v[2]).sum::<u32>() as usize)
+                                                        .collect();
+        let compressed_size: Vec<usize> = tile_offsets.chunks(tile_chunk)
+                                                      .map(|c| c.iter().map(|v| v[3]).sum::<u32>() as usize)
+                                                      .collect();
 
         Ok(CBCLHeader {
             cbcl_path: cbcl_path.to_path_buf(),
@@ -83,18 +103,31 @@ impl CBCLHeader {
             number_of_bins,
             bins,
             num_tile_records,
-            tile_offsets,
+            tiles,
             non_pf_clusters_excluded,
+            start_pos,
+            uncompressed_size,
+            compressed_size,
         })
+    }
+
+    pub fn decode_qscore(&self, q: u8) -> u8 {
+        match q {
+            0 => self.bins[0][1],
+            1 => self.bins[1][1],
+            2 => self.bins[2][1],
+            3 => self.bins[3][1],
+            _ => b'#',
+        }
     }
 }
 
 
 /// Decode a `.cbcl` header into a `CBCLHeader` struct or panic
-pub fn cbcl_header_decoder(cbcl_path: &Path) -> std::io::Result<CBCLHeader> {
+pub fn cbcl_header_decoder(cbcl_path: &Path, tile_chunk: usize) -> std::io::Result<CBCLHeader> {
     let f = File::open(cbcl_path)?;
 
-    let cbcl_header = CBCLHeader::from_reader(cbcl_path, f)?;
+    let cbcl_header = CBCLHeader::from_reader(cbcl_path, f, tile_chunk)?;
 
     Ok(cbcl_header)
 }
@@ -107,7 +140,7 @@ mod tests {
     #[test]
     fn decode() {
         let cbcl_path = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/BaseCalls/L001/C1.1/L001_1.cbcl");
-        let actual_cbclheader = cbcl_header_decoder(cbcl_path).unwrap();
+        let actual_cbclheader = cbcl_header_decoder(cbcl_path, 2).unwrap();
         let expected_cbclheader =
             CBCLHeader {
                 cbcl_path: cbcl_path.to_path_buf(),
@@ -116,10 +149,13 @@ mod tests {
                 bits_per_basecall: 2,
                 bits_per_qscore: 2,
                 number_of_bins: 4,
-                bins: vec![[0, 0], [1, 11], [2, 25], [3, 37]],
+                bins: vec![[0, 35], [1, 44], [2, 58], [3, 70]],
                 num_tile_records: 3,
-                tile_offsets: vec![[1101, 100, 50, 73], [1102, 100, 50, 73], [1103, 100, 50, 73]],
+                tiles: vec![1101, 1102, 1103],
                 non_pf_clusters_excluded: false,
+                start_pos: vec![97, 243],
+                uncompressed_size: vec![100, 50],
+                compressed_size: vec![146, 73],
             };
         assert_eq!(actual_cbclheader, expected_cbclheader)
     }
@@ -130,7 +166,7 @@ mod tests {
     )]
     fn no_file() {
         let cbcl_path = Path::new("test_data/no_file.cbcl");
-        cbcl_header_decoder(cbcl_path).unwrap();
+        cbcl_header_decoder(cbcl_path, 2).unwrap();
     }
 
     #[test]
@@ -139,6 +175,6 @@ mod tests {
     )]
     fn bad_file() {
         let cbcl_path = Path::new("test_data/bad_data_8.bin");
-        cbcl_header_decoder(cbcl_path).unwrap();
+        cbcl_header_decoder(cbcl_path, 2).unwrap();
     }
 }
