@@ -27,35 +27,35 @@ impl<'de> Deserialize<'de> for RunInfo {
     where
         D: de::Deserializer<'de>
     {
-        #[derive(Debug, Deserialize, PartialEq, Eq)]
-        pub struct OuterRunInfo {
+        #[derive(Deserialize)]
+        struct Outer {
             #[serde(rename = "Version")]
-            pub version: u32,
+            version: u32,
             #[serde(rename = "Run")]
-            pub run: InnerRun
+            run: Inner
         }
 
-        #[derive(Debug, Deserialize, PartialEq, Eq)]
-        pub struct InnerRun {
+        #[derive(Deserialize)]
+        struct Inner {
             #[serde(rename = "Id")]
-            pub id: String,
+            id: String,
             #[serde(rename = "Number")]
-            pub number: u64,
+            number: u64,
             #[serde(rename = "Flowcell")]
-            pub flowcell: String,
+            flowcell: String,
             #[serde(rename = "Instrument")]
-            pub instrument: String,
+            instrument: String,
             #[serde(rename = "Date")]
-            pub date: String,
+            date: String,
             #[serde(rename = "Reads", deserialize_with = "reads_to_vec")]
-            pub reads: Vec<Read>,
+            reads: Vec<Read>,
             #[serde(rename = "FlowcellLayout")]
-            pub flowcell_layout: FlowcellLayout,
+            flowcell_layout: FlowcellLayout,
         }
 
-        let helper = OuterRunInfo::deserialize(deserializer)?;
+        let helper = Outer::deserialize(deserializer)?;
 
-        Ok(RunInfo { 
+        Ok(RunInfo {
             version: helper.version,
             id: helper.run.id,
             number: helper.run.number,
@@ -64,7 +64,7 @@ impl<'de> Deserialize<'de> for RunInfo {
             date: helper.run.date,
             reads: helper.run.reads,
             flowcell_layout: helper.run.flowcell_layout,
-        })   
+        })
     }
 }
 
@@ -81,7 +81,7 @@ where
     D: de::Deserializer<'de>,
 {
     let reads = Reads::deserialize(deserializer)?;
-    
+
     let mut i = 0;
     let reads = reads.read.into_iter().map(|r| {
         let read = Read { start: i, .. r };
@@ -121,49 +121,77 @@ where
 }
 
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct FlowcellLayout {
-    #[serde(rename = "LaneCount")]
     pub lane_count: u32,
-    #[serde(rename = "SurfaceCount")]
     pub surface_count: u32,
-    #[serde(rename = "SwathCount")]
     pub swath_count: u64,
-    #[serde(rename = "TileCount")]
     pub tile_count: u64,
-    #[serde(rename = "FlowcellSide")]
     pub flowcell_side: u32,
-    #[serde(rename = "TileSet")]
-    pub tile_set: TileSet,
-}
-
-
-#[derive(Debug, Deserialize, PartialEq, Eq)]
-pub struct TileSet {
-    #[serde(rename = "TileNamingConvention")]
     pub tile_naming_convention: String,
-    #[serde(rename = "Tiles", deserialize_with = "tiles_to_vec")]
     pub tiles: Vec<String>,
 }
 
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
-pub struct Tiles {
-     #[serde(rename = "Tile")]
-    pub tile: Vec<String>,
-}
+impl<'de> Deserialize<'de> for FlowcellLayout {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>
+    {
+        #[derive(Deserialize)]
+        struct Outer {
+            #[serde(rename = "LaneCount")]
+            lane_count: u32,
+            #[serde(rename = "SurfaceCount")]
+            surface_count: u32,
+            #[serde(rename = "SwathCount")]
+            swath_count: u64,
+            #[serde(rename = "TileCount")]
+            tile_count: u64,
+            #[serde(rename = "FlowcellSide")]
+            flowcell_side: u32,
+            #[serde(rename = "TileSet")]
+            tile_set: Inner,
+        }
 
+        #[derive(Deserialize)]
+        struct Inner {
+            #[serde(rename = "TileNamingConvention")]
+            tile_naming_convention: String,
+            #[serde(rename = "Tiles", deserialize_with = "tiles_to_vec")]
+            tiles: Vec<String>,
+        }
 
-fn tiles_to_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    match Tiles::deserialize(deserializer) {
-        Ok(tiles) => Ok(tiles.tile),
-        _ => Err(de::Error::invalid_value(
-            de::Unexpected::Other("Failed to deserialize"),
-            &"a Tiles struct",
-        )),
+        #[derive(Deserialize)]
+        struct Tiles {
+            #[serde(rename = "Tile")]
+            tile: Vec<String>,
+        }
+
+        fn tiles_to_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+        where
+            D: de::Deserializer<'de>,
+        {
+            match Tiles::deserialize(deserializer) {
+                Ok(tiles) => Ok(tiles.tile),
+                _ => Err(de::Error::invalid_value(
+                    de::Unexpected::Other("Failed to deserialize"),
+                    &"a Tiles struct",
+                )),
+            }
+        }
+
+        let helper = Outer::deserialize(deserializer)?;
+
+        Ok(FlowcellLayout {
+            lane_count: helper.lane_count,
+            surface_count: helper.surface_count,
+            swath_count: helper.swath_count,
+            tile_count: helper.tile_count,
+            flowcell_side: helper.flowcell_side,
+            tile_naming_convention: helper.tile_set.tile_naming_convention,
+            tiles: helper.tile_set.tiles,
+        })
     }
 }
 
@@ -211,14 +239,12 @@ mod tests {
                     swath_count: 6,
                     tile_count: 3,
                     flowcell_side: 1,
-                    tile_set: TileSet {
-                        tile_naming_convention: "FourDigit".to_owned(),
-                        tiles: vec![
-                            "1_1101".to_owned(),
-                            "1_1102".to_owned(),
-                            "1_1103".to_owned(),
-                        ]
-                    },
+                    tile_naming_convention: "FourDigit".to_owned(),
+                    tiles: vec![
+                        "1_1101".to_owned(),
+                        "1_1102".to_owned(),
+                        "1_1103".to_owned(),
+                    ]
                 }
             };
         assert_eq!(actual_runinfo, expected_runinfo)
