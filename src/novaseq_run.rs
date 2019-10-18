@@ -44,9 +44,9 @@ impl NovaSeqRun {
         let run_info = parse_run_info(&run_path.join("RunInfo.xml"))?;
         let run_id = format!(
             "@{}:{}:{}",
-            run_info.runs.instrument,
-            run_info.runs.number,
-            run_info.runs.flowcell,
+            run_info.instrument,
+            run_info.number,
+            run_info.flowcell,
         );
 
         let locs = locs_decoder(&run_path.join("Data/Intensities/s.locs"))?;
@@ -56,9 +56,9 @@ impl NovaSeqRun {
         let mut pf_filters = HashMap::new();
         let mut read_ids = HashMap::new();
 
-        let n_lanes = run_info.runs.flow_cell_layout.lane_count;
-        let n_surfaces = run_info.runs.flow_cell_layout.surface_count;
-        let n_cycles = run_info.runs.reads.read.iter().map(|v| v.num_cycles).sum::<u64>();
+        let n_lanes = run_info.flowcell_layout.lane_count;
+        let n_surfaces = run_info.flowcell_layout.surface_count;
+        let n_cycles = run_info.reads.iter().map(|v| v.num_cycles).sum::<usize>();
 
         for lane in 1..=n_lanes {
             for surface in 1..=n_surfaces {

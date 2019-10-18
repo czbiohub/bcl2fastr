@@ -127,8 +127,8 @@ pub fn extract_samples(
 
     let mut gz_writer = GzEncoder::new(out_file, flate2::Compression::new(9));
 
-    for lane in 1..=novaseq_run.run_info.runs.flow_cell_layout.lane_count {
-        for surface in 1..=novaseq_run.run_info.runs.flow_cell_layout.surface_count {
+    for lane in 1..=novaseq_run.run_info.flowcell_layout.lane_count {
+        for surface in 1..=novaseq_run.run_info.flowcell_layout.surface_count {
             let headers = novaseq_run.headers.get(&(lane, surface)).unwrap();
             let filters = novaseq_run.filters.get(&(lane, surface)).unwrap();
             let pf_filters = novaseq_run.pf_filters.get(&(lane, surface)).unwrap();

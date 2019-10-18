@@ -9,50 +9,101 @@ use serde::{de, Deserialize};
 use serde_xml_rs::from_reader;
 
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct RunInfo {
-    #[serde(rename = "Version", default)]
     pub version: u32,
-    #[serde(rename = "Run")]
-    pub runs: Run
+    pub id: String,
+    pub number: u64,
+    pub flowcell: String,
+    pub instrument: String,
+    pub date: String,
+    pub reads: Vec<Read>,
+    pub flowcell_layout: FlowcellLayout,
 }
 
+impl<'de> Deserialize<'de> for RunInfo {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>
+    {
+        #[derive(Debug, Deserialize, PartialEq, Eq)]
+        pub struct OuterRunInfo {
+            #[serde(rename = "Version")]
+            pub version: u32,
+            #[serde(rename = "Run")]
+            pub run: InnerRun
+        }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
-pub struct Run {
-    #[serde(rename = "Id", default)]
-    pub id: String, // parsed from run info, outputed in fastq
-    #[serde(rename = "Number", default)]
-    pub number: u64,
-    #[serde(rename = "Flowcell", default)]
-    pub flowcell: String,
-    #[serde(rename = "Instrument", default)]
-    pub instrument: String,
-    #[serde(rename = "Date", default)]
-    pub date: String,
-    #[serde(rename = "Reads")]
-    pub reads: Reads,
-    #[serde(rename = "FlowcellLayout")]
-    pub flow_cell_layout: FlowcellLayout,
+        #[derive(Debug, Deserialize, PartialEq, Eq)]
+        pub struct InnerRun {
+            #[serde(rename = "Id")]
+            pub id: String,
+            #[serde(rename = "Number")]
+            pub number: u64,
+            #[serde(rename = "Flowcell")]
+            pub flowcell: String,
+            #[serde(rename = "Instrument")]
+            pub instrument: String,
+            #[serde(rename = "Date")]
+            pub date: String,
+            #[serde(rename = "Reads", deserialize_with = "reads_to_vec")]
+            pub reads: Vec<Read>,
+            #[serde(rename = "FlowcellLayout")]
+            pub flowcell_layout: FlowcellLayout,
+        }
+
+        let helper = OuterRunInfo::deserialize(deserializer)?;
+
+        Ok(RunInfo { 
+            version: helper.version,
+            id: helper.run.id,
+            number: helper.run.number,
+            flowcell: helper.run.flowcell,
+            instrument: helper.run.instrument,
+            date: helper.run.date,
+            reads: helper.run.reads,
+            flowcell_layout: helper.run.flowcell_layout,
+        })   
+    }
 }
 
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct Reads {
-    #[serde(rename = "Read", default)]
+    #[serde(rename = "Read")]
     pub read: Vec<Read>,
+}
+
+
+fn reads_to_vec<'de, D>(deserializer: D) -> Result<Vec<Read>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let reads = Reads::deserialize(deserializer)?;
+    
+    let mut i = 0;
+    let reads = reads.read.into_iter().map(|r| {
+        let read = Read { start: i, .. r };
+        i += r.num_cycles;
+        read
+    }).collect();
+
+    Ok(reads)
 }
 
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct Read {
-    #[serde(rename = "Number", default)]
-    pub number: u64, // parsed from run info, outputed in fastq
-    #[serde(rename = "NumCycles", default)]
-    pub num_cycles: u64, // number of cycles expected for one read (~100)
+    #[serde(rename = "Number")]
+    pub number: u64,
+    #[serde(rename = "NumCycles")]
+    pub num_cycles: usize,
     #[serde(rename = "IsIndexedRead", deserialize_with = "bool_from_string")]
     pub is_indexed_read: bool,
+    #[serde(default)]
+    pub start: usize,
 }
+
 
 fn bool_from_string<'de, D>(deserializer: D) -> Result<bool, D::Error>
 where
@@ -71,15 +122,15 @@ where
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct FlowcellLayout {
-    #[serde(rename = "LaneCount", default)]
+    #[serde(rename = "LaneCount")]
     pub lane_count: u32,
-    #[serde(rename = "SurfaceCount", default)]
+    #[serde(rename = "SurfaceCount")]
     pub surface_count: u32,
-    #[serde(rename = "SwathCount", default)]
+    #[serde(rename = "SwathCount")]
     pub swath_count: u64,
-    #[serde(rename = "TileCount", default)]
+    #[serde(rename = "TileCount")]
     pub tile_count: u64,
-    #[serde(rename = "FlowcellSide", default)]
+    #[serde(rename = "FlowcellSide")]
     pub flowcell_side: u32,
     #[serde(rename = "TileSet")]
     pub tile_set: TileSet,
@@ -88,17 +139,31 @@ pub struct FlowcellLayout {
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct TileSet {
-    #[serde(rename = "TileNamingConvention", default)]
+    #[serde(rename = "TileNamingConvention")]
     pub tile_naming_convention: String,
-    #[serde(rename = "Tiles")]
-    pub tiles: Tiles
+    #[serde(rename = "Tiles", deserialize_with = "tiles_to_vec")]
+    pub tiles: Vec<String>,
 }
 
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct Tiles {
-     #[serde(rename = "Tile", default)]
+     #[serde(rename = "Tile")]
     pub tile: Vec<String>,
+}
+
+
+fn tiles_to_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    match Tiles::deserialize(deserializer) {
+        Ok(tiles) => Ok(tiles.tile),
+        _ => Err(de::Error::invalid_value(
+            de::Unexpected::Other("Failed to deserialize"),
+            &"a Tiles struct",
+        )),
+    }
 }
 
 
@@ -128,37 +193,31 @@ mod tests {
         let expected_runinfo =
             RunInfo {
                 version: 5,
-                runs: Run {
-                    id: "190414_A00111_0296_AHJCWWDSXX".to_owned(),
-                    number: 296,
-                    flowcell: "HJCWWDSXX".to_owned(),
-                    instrument: "A00111".to_owned(),
-                    date: "4/14/2019 1:17:20 PM".to_owned(),
-                    reads: Reads {
-                        read: vec![
-                            Read { number: 1, num_cycles: 4, is_indexed_read: false },
-                            Read { number: 2, num_cycles: 8, is_indexed_read: true },
-                            Read { number: 3, num_cycles: 8, is_indexed_read: true },
-                            Read { number: 4, num_cycles: 4, is_indexed_read: false },
+                id: "190414_A00111_0296_AHJCWWDSXX".to_owned(),
+                number: 296,
+                flowcell: "HJCWWDSXX".to_owned(),
+                instrument: "A00111".to_owned(),
+                date: "4/14/2019 1:17:20 PM".to_owned(),
+                reads: vec![
+                    Read { number: 1, start: 0, num_cycles: 4, is_indexed_read: false },
+                    Read { number: 2, start: 4, num_cycles: 8, is_indexed_read: true },
+                    Read { number: 3, start: 12, num_cycles: 8, is_indexed_read: true },
+                    Read { number: 4, start: 20, num_cycles: 4, is_indexed_read: false },
+                ],
+                flowcell_layout: FlowcellLayout {
+                    lane_count: 1,
+                    surface_count: 1,
+                    swath_count: 6,
+                    tile_count: 3,
+                    flowcell_side: 1,
+                    tile_set: TileSet {
+                        tile_naming_convention: "FourDigit".to_owned(),
+                        tiles: vec![
+                            "1_1101".to_owned(),
+                            "1_1102".to_owned(),
+                            "1_1103".to_owned(),
                         ]
                     },
-                    flow_cell_layout: FlowcellLayout {
-                        lane_count: 1,
-                        surface_count: 1,
-                        swath_count: 6,
-                        tile_count: 3,
-                        flowcell_side: 1,
-                        tile_set: TileSet {
-                            tile_naming_convention: "FourDigit".to_owned(),
-                            tiles: Tiles { 
-                                tile: vec![
-                                    "1_1101".to_owned(),
-                                    "1_1102".to_owned(),
-                                    "1_1103".to_owned(),
-                                ]
-                            }
-                        },
-                    }
                 }
             };
         assert_eq!(actual_runinfo, expected_runinfo)
@@ -184,7 +243,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-      expected = r#"4:10 Unexpected closing tag: RunInfo, expected Run"#
+      expected = r#"Error parsing RunInfo: custom: 'missing field `Read`'"#
     )]
     fn bad_file() {
         let filename_info = Path::new("test_data/bad_RunInfo.xml");
