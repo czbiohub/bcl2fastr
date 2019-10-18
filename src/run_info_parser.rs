@@ -21,6 +21,7 @@ pub struct RunInfo {
     pub flowcell_layout: FlowcellLayout,
 }
 
+
 impl<'de> Deserialize<'de> for RunInfo {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
