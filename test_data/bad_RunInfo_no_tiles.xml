@@ -1,0 +1,26 @@
+<?xml version='1.0' encoding='utf-8'?>
+<RunInfo Version="5">
+	<Run Id="190414_A00111_0296_AHJCWWDSXX" Number="296">
+		<Flowcell>HJCWWDSXX</Flowcell>
+		<Instrument>A00111</Instrument>
+		<Date>4/14/2019 1:17:20 PM</Date>
+		<Reads>
+			<Read IsIndexedRead="N" NumCycles="4" Number="1" />
+			<Read IsIndexedRead="Y" NumCycles="8" Number="2" />
+			<Read IsIndexedRead="Y" NumCycles="8" Number="3" />
+			<Read IsIndexedRead="N" NumCycles="4" Number="4" />
+		</Reads>
+		<FlowcellLayout FlowcellSide="1" LaneCount="1" SurfaceCount="1" SwathCount="6" TileCount="3">
+			<TileSet TileNamingConvention="FourDigit">
+				<Tiles>
+				</Tiles>
+			</TileSet>
+		</FlowcellLayout>
+		<AlignToPhiX />
+		<ImageDimensions Height="3607" Width="3200" />
+		<ImageChannels>
+			<Name>RED</Name>
+			<Name>GREEN</Name>
+		</ImageChannels>
+	</Run>
+</RunInfo>

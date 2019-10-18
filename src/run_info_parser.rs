@@ -172,13 +172,9 @@ impl<'de> Deserialize<'de> for FlowcellLayout {
         where
             D: de::Deserializer<'de>,
         {
-            match Tiles::deserialize(deserializer) {
-                Ok(tiles) => Ok(tiles.tile),
-                _ => Err(de::Error::invalid_value(
-                    de::Unexpected::Other("Failed to deserialize"),
-                    &"a Tiles struct",
-                )),
-            }
+            let tiles = Tiles::deserialize(deserializer)?;
+
+            Ok(tiles.tile)
         }
 
         let helper = Outer::deserialize(deserializer)?;
@@ -272,8 +268,17 @@ mod tests {
     #[should_panic(
       expected = r#"Error parsing RunInfo: custom: 'missing field `Read`'"#
     )]
-    fn bad_file() {
-        let filename_info = Path::new("test_data/bad_RunInfo.xml");
+    fn no_reads() {
+        let filename_info = Path::new("test_data/bad_RunInfo_no_reads.xml");
+        parse_run_info(filename_info).unwrap();
+    }
+
+    #[test]
+    #[should_panic(
+      expected = r#"Error parsing RunInfo: custom: 'missing field `Tile`'"#
+    )]
+    fn no_tiles() {
+        let filename_info = Path::new("test_data/bad_RunInfo_no_tiles.xml");
         parse_run_info(filename_info).unwrap();
     }
 
