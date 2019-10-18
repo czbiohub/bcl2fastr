@@ -9,19 +9,30 @@ use serde::{de, Deserialize};
 use serde_xml_rs::from_reader;
 
 
+/// The top-level struct for the contents of RunInfo.xml
 #[derive(Debug, PartialEq, Eq)]
 pub struct RunInfo {
+    /// Version number of this file (depends on the sequencer)
     pub version: u32,
+    /// Full instrument id string (date, instrument, number, flowcell)
     pub id: String,
+    /// Number representing how many runs this instrument has performed
     pub number: u64,
+    /// Flowcell serial number
     pub flowcell: String,
+    /// Instrument serial number/identifier
     pub instrument: String,
+    /// The date and time of the run
     pub date: String,
+    /// Format of the run: number of reads, read lengths, and which are indexes
     pub reads: Vec<Read>,
+    /// Flowcell information: number of lanes, surfaces, and tiles
     pub flowcell_layout: FlowcellLayout,
 }
 
 
+/// Deserialize RunInfo, including flattening the inner Run struct
+/// into the top level
 impl<'de> Deserialize<'de> for RunInfo {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -53,6 +64,28 @@ impl<'de> Deserialize<'de> for RunInfo {
             flowcell_layout: FlowcellLayout,
         }
 
+        #[derive(Deserialize)]
+        struct Reads {
+            #[serde(rename = "Read")]
+            pub read: Vec<Read>,
+        }
+
+        fn reads_to_vec<'de, D>(deserializer: D) -> Result<Vec<Read>, D::Error>
+        where
+            D: de::Deserializer<'de>,
+        {
+            let reads = Reads::deserialize(deserializer)?;
+
+            let mut i = 0;
+            let reads = reads.read.into_iter().map(|r| {
+                let read = Read { start: i, .. r };
+                i += r.num_cycles;
+                read
+            }).collect();
+
+            Ok(reads)
+        }
+
         let helper = Outer::deserialize(deserializer)?;
 
         Ok(RunInfo {
@@ -69,43 +102,26 @@ impl<'de> Deserialize<'de> for RunInfo {
 }
 
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
-pub struct Reads {
-    #[serde(rename = "Read")]
-    pub read: Vec<Read>,
-}
-
-
-fn reads_to_vec<'de, D>(deserializer: D) -> Result<Vec<Read>, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    let reads = Reads::deserialize(deserializer)?;
-
-    let mut i = 0;
-    let reads = reads.read.into_iter().map(|r| {
-        let read = Read { start: i, .. r };
-        i += r.num_cycles;
-        read
-    }).collect();
-
-    Ok(reads)
-}
-
-
+/// Information about one of the reads in a run
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 pub struct Read {
+    /// Which read this is
     #[serde(rename = "Number")]
     pub number: u64,
+    /// How many cycles (e.g. bases) in the read
     #[serde(rename = "NumCycles")]
     pub num_cycles: usize,
+    /// Whether or not it is an index read
     #[serde(rename = "IsIndexedRead", deserialize_with = "bool_from_string")]
     pub is_indexed_read: bool,
+    /// The starting index of the read within the full base array.
+    /// This is not in the XML file but is calculated during deserialization
     #[serde(default)]
     pub start: usize,
 }
 
 
+/// Convert from Y or N character to a boolean
 fn bool_from_string<'de, D>(deserializer: D) -> Result<bool, D::Error>
 where
     D: de::Deserializer<'de>,
@@ -121,18 +137,28 @@ where
 }
 
 
+/// Information about the flowcell used in the run
 #[derive(Debug, PartialEq, Eq)]
 pub struct FlowcellLayout {
+    /// Number of lanes
     pub lane_count: u32,
+    /// Number of surfaces per lane
     pub surface_count: u32,
+    /// Swathes per lane
     pub swath_count: u64,
+    /// Number of tiles per swath
     pub tile_count: u64,
+    /// Sides of the flowcell
     pub flowcell_side: u32,
+    /// Format for naming tiles
     pub tile_naming_convention: String,
+    /// A Vec of tile names
     pub tiles: Vec<String>,
 }
 
 
+/// Deserialize the FlowcellLayout struct including flattening the interior
+/// TileNamingConvention struct into the top level
 impl<'de> Deserialize<'de> for FlowcellLayout {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
