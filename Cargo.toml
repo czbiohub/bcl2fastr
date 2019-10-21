@@ -16,5 +16,8 @@ ndarray = "0.13.0"
 clap = "2.33"
 bitvec = "0.15"
 
+[dev-dependencies]
+assert_cli = "0.6.3"
+
 [build-dependencies]
 cc = "1.0"

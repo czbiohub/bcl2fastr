@@ -47,8 +47,20 @@ fn main() {
         get_matches();
 
     let run_path = PathBuf::from(matches.value_of("run-path").unwrap());
-    let _samplesheet = matches.value_of("samplesheet").unwrap();
-    let output = matches.value_of("output").unwrap();
+    if !run_path.exists() {
+         panic!("Could not find run path {}", run_path.display());
+    }
+
+    let samplesheet = PathBuf::from(matches.value_of("samplesheet").unwrap());
+    if !samplesheet.exists() {
+         panic!("Could not find samplesheet {}", samplesheet.display());
+    }
+
+    let output = PathBuf::from(matches.value_of("output").unwrap());
+    if !output.exists() {
+         panic!("Could not find output path {}", output.display());
+    }
+
     let _threads = value_t!(matches, "threads", u32).unwrap_or_else(|e| e.exit());
     let tile_chunk = value_t!(matches, "tile-chunk", usize).unwrap_or_else(|e| e.exit());
     let _split_lanes = matches.is_present("split-lanes");
@@ -58,5 +70,5 @@ fn main() {
         Err(e) => panic!("Error reading NovaSeq run: {}", e),
     };
 
-    extract_reads::extract_samples(novaseq_run, PathBuf::from(output)).unwrap();
+    extract_reads::extract_samples(novaseq_run, output).unwrap();
 }

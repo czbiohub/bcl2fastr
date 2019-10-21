@@ -217,13 +217,4 @@ mod tests {
 
         assert_eq!(bq_pairs, expected_bq_pairs)
     }
-
-    #[test]
-    fn extract_samples() {
-        let run_path = PathBuf::from("test_data/190414_A00111_0296_AHJCWWDSXX");
-        let output_path = PathBuf::from("test_data/test_output");
-        let novaseq_run = NovaSeqRun::read_path(run_path, 2).unwrap();
-
-        super::extract_samples(novaseq_run, output_path).unwrap()
-    }
 }
