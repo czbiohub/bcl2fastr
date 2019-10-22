@@ -17,7 +17,8 @@ clap = "2.33"
 bitvec = "0.15"
 
 [dev-dependencies]
-assert_cli = "0.6.3"
+assert_cmd = "0.11"
+predicates = "1.0"
 
 [build-dependencies]
 cc = "1.0"
