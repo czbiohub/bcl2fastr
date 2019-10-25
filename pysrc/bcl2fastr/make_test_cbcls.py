@@ -12,7 +12,7 @@ import numpy as np
 
 import click
 
-from seqbot.bcl2fastr import NovaSeqRun, CBCLHeader, get_cycle, get_tile
+from bcl2fastr import NovaSeqRun, CBCLHeader, get_cycle, get_tile
 
 
 def make_run_info(
