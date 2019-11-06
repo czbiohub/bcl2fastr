@@ -4,12 +4,15 @@
 use std::path::PathBuf;
 use clap::{Arg, App, value_t};
 
+
 mod run_info_parser;
 mod filter_decoder;
 mod locs_decoder;
 mod cbcl_header_decoder;
 mod extract_reads;
 mod novaseq_run;
+mod sample_data;
+
 
 
 /// Parses command line arguments and runs demux
@@ -61,14 +64,20 @@ fn main() {
           panic!("Could not find output path {}", output.display());
      }
 
-     let _threads = value_t!(matches, "threads", u32).unwrap_or_else(|e| e.exit());
-     let tile_chunk = value_t!(matches, "tile-chunk", usize).unwrap_or_else(|e| e.exit());
-     let _split_lanes = matches.is_present("split-lanes");
 
-     let novaseq_run = match novaseq_run::NovaSeqRun::read_path(run_path, tile_chunk) {
+    let _threads = value_t!(matches, "threads", u32).unwrap_or_else(|e| e.exit());
+    let tile_chunk = value_t!(matches, "tile-chunk", usize).unwrap_or_else(|e| e.exit());
+    let _split_lanes = matches.is_present("split-lanes");
+
+    let novaseq_run = match novaseq_run::NovaSeqRun::read_path(run_path, tile_chunk) {
           Ok(n_run) => n_run,
           Err(e) => panic!("Error reading NovaSeq run: {}", e),
      };
 
-     extract_reads::extract_samples(novaseq_run, output).unwrap();
+    extract_reads::extract_samples(novaseq_run, output).unwrap();
+        
+    let _sample_data = match sample_data::SampleData::read_path(samplesheet) {
+        Ok(sd) => sd,
+        Err(e) => panic!("Error reading samplesheet: {}", e),
+    };       
 }

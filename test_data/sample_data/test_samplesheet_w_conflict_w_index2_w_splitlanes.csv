@@ -1,0 +1,4 @@
+[Data],Unnamed: 1,Unnamed: 2,Unnamed: 3,Unnamed: 4,Unnamed: 5,Unnamed: 6,Unnamed: 7,Unnamed: 8,Unnamed: 9,Unnamed: 10,Unnamed: 11,Unnamed: 12,Unnamed: 13,Unnamed: 14
+Study_ID,Study_Description,BioSample_ID,BioSample_Description,Sample_ID,Sample_Name,Sample_Project,Index_ID,Index,Index2_ID,Index2,Organism,Lane,Sex,Tissue_Source
+MOZ2018,Malaria Genotyping,MOZ2018-96,Malaria Plasmodium samples extracted from dried blood spot of Mozambique field sample,800282,800282,Anna_Chen,truseq-red-F4R1-A01-i7,CCCCT,truseq-red-F4R1-A01-i5,TTTTT,P falciparum,1,,
+MOZ2018,Malaria Genotyping,MOZ2018-97,Malaria Plasmodium samples extracted from dried blood spot of Mozambique field sample,800283,800283,Anna_Chen,truseq-red-F4R1-A02-i7,CCCCC,truseq-red-F4R1-A02-i5,AAAAA,P falciparum,1,,

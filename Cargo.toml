@@ -15,6 +15,8 @@ flate2 = "1.0"
 ndarray = "0.13.0"
 clap = "2.33"
 bitvec = "0.15"
+itertools = "0.8.0"
+csv = "1.1"
 
 [dev-dependencies]
 assert_cmd = "0.11"
