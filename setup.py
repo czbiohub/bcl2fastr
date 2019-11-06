@@ -30,13 +30,8 @@ setuptools.setup(
     ],
     include_package_data=True,
     zip_safe=False,
-    install_requires=[
-        "click >= 6.7",
-        "numpy >= 1.15.0",
-    ],
+    install_requires=["click >= 6.7", "numpy >= 1.15.0"],
     entry_points={
-        "console_scripts": [
-            "make_test_cbcls = bcl2fastr.make_test_cbcls:main",
-        ]
+        "console_scripts": ["make_test_cbcls = bcl2fastr.make_test_cbcls:main"]
     },
 )

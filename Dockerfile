@@ -7,6 +7,6 @@ WORKDIR /usr/src/bcl2fastr
 COPY . .
 
 RUN cargo install --path .
-RUN bash -c 'if [ ${dev} == 1 ]; then cargo install assert_cli; fi'
+RUN bash -c 'if [ ${dev} == 1 ]; then cargo test; fi'
 
 CMD ["cargo", "run"]

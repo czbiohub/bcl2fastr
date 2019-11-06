@@ -2,7 +2,7 @@
 //! of information about the sequencing run.
 
 use std::{
-    fs,
+    fs::File,
     path::Path,
 };
 use serde::{de, Deserialize};
@@ -76,11 +76,9 @@ impl<'de> Deserialize<'de> for RunInfo {
         {
             let reads = Reads::deserialize(deserializer)?;
 
-            let mut i = 0;
-            let reads = reads.read.into_iter().map(|r| {
-                let read = Read { start: i, .. r };
-                i += r.num_cycles;
-                read
+            let reads = reads.read.into_iter().scan(0, |i, r| {
+                *i += r.num_cycles;
+                Some(Read { start: *i - r.num_cycles, end: *i, .. r })
             }).collect();
 
             Ok(reads)
@@ -118,6 +116,10 @@ pub struct Read {
     /// This is not in the XML file but is calculated during deserialization
     #[serde(default)]
     pub start: usize,
+    /// The end index of the read within the full base array.
+    /// This is not in the XML file but is calculated during deserialization
+    #[serde(default)]
+    pub end: usize,
 }
 
 
@@ -220,9 +222,9 @@ impl<'de> Deserialize<'de> for FlowcellLayout {
 
 /// Parse a `RunInfo.xml` file into a `RunInfo` struct or panic
 pub fn parse_run_info(run_info_path: &Path) -> std::io::Result<RunInfo> {
-    let run_xml = fs::read_to_string(run_info_path)?;
+    let run_xml = File::open(run_info_path)?;
 
-    let runinfo: RunInfo = match from_reader(run_xml.as_bytes()) {
+    let runinfo: RunInfo = match from_reader(run_xml) {
         Err(e) => panic!(
             "Error parsing RunInfo: {}", e
         ),
@@ -250,10 +252,10 @@ mod tests {
                 instrument: "A00111".to_owned(),
                 date: "4/14/2019 1:17:20 PM".to_owned(),
                 reads: vec![
-                    Read { number: 1, start: 0, num_cycles: 4, is_indexed_read: false },
-                    Read { number: 2, start: 4, num_cycles: 8, is_indexed_read: true },
-                    Read { number: 3, start: 12, num_cycles: 8, is_indexed_read: true },
-                    Read { number: 4, start: 20, num_cycles: 4, is_indexed_read: false },
+                    Read { number: 1, start: 0, end: 4, num_cycles: 4, is_indexed_read: false },
+                    Read { number: 2, start: 4, end: 12, num_cycles: 8, is_indexed_read: true },
+                    Read { number: 3, start: 12, end: 20, num_cycles: 8, is_indexed_read: true },
+                    Read { number: 4, start: 20, end: 24, num_cycles: 4, is_indexed_read: false },
                 ],
                 flowcell_layout: FlowcellLayout {
                     lane_count: 1,

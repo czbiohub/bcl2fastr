@@ -16,7 +16,11 @@ from bcl2fastr import NovaSeqRun, CBCLHeader, get_cycle, get_tile
 
 
 def make_run_info(
-    run_path: pathlib.Path, output_path: pathlib.Path, n_tiles: int, n_bases: int
+    run_path: pathlib.Path,
+    output_path: pathlib.Path,
+    n_lanes: int,
+    n_tiles: int,
+    n_bases: int,
 ):
     with (run_path / "RunInfo.xml").open() as f:
         run_info = et.parse(f)
@@ -27,7 +31,7 @@ def make_run_info(
 
     fcl = run_info.find("./Run/FlowcellLayout")
     fcl.attrib.update(
-        {"LaneCount": "1", "SurfaceCount": "1", "TileCount": f"{n_tiles}"}
+        {"LaneCount": f"{n_lanes}", "SurfaceCount": "1", "TileCount": f"{n_tiles}"}
     )
 
     t = fcl.find("./TileSet/Tiles")
@@ -51,12 +55,16 @@ def subset_locs(run_path: pathlib.Path, output_path: pathlib.Path, n_reads: int)
 
 
 def subset_filters(
-    run_path: pathlib.Path, data_path: pathlib.Path, n_tiles: int, n_reads: int
+    run_path: pathlib.Path,
+    data_path: pathlib.Path,
+    lane: int,
+    n_tiles: int,
+    n_reads: int,
 ):
     # write filter files
     filter_list = sorted(
-        (run_path / "Data" / "Intensities" / "BaseCalls" / f"L001").glob(
-            f"s_1_*.filter"
+        (run_path / "Data" / "Intensities" / "BaseCalls" / f"L00{lane}").glob(
+            f"s_{lane}_*.filter"
         ),
         key=get_tile,
     )[:n_tiles]
@@ -158,11 +166,20 @@ def subset_cycle(
     required=True,
     type=click.Path(exists=True, file_okay=False, dir_okay=True),
 )
-@click.option("--n_tiles", required=True, type=int)
-@click.option("--n_reads", required=True, type=int)
-@click.option("--n_bases", required=True, type=int)
-def main(run_path: str, output_path: str, n_tiles: int, n_reads: int, n_bases: int):
+@click.option("--n_lanes", required=True, type=int, help="Lanes to use")
+@click.option("--n_tiles", required=True, type=int, help="Tiles to subset per lane")
+@click.option("--n_reads", required=True, type=int, help="Reads to use per tile")
+@click.option("--n_bases", required=True, type=int, help="Total bases, w/ index")
+def main(
+    run_path: str,
+    output_path: str,
+    n_lanes: int,
+    n_tiles: int,
+    n_reads: int,
+    n_bases: int,
+):
     # this is just simpler
+    assert 0 < n_lanes < 5
     assert n_reads % 2 == 0
     assert n_bases % 2 == 0
 
@@ -181,41 +198,44 @@ def main(run_path: str, output_path: str, n_tiles: int, n_reads: int, n_bases: i
     for c in range(ix_start + 1, ix_end + n_bases // 2 + 1):
         cycles_to_use[c] = len(cycles_to_use) + 1
 
-    cbcl_files = {
-        get_cycle(cbcl_file): cbcl_file
-        for cbcl_file in (
-            run_path / "Data" / "Intensities" / "BaseCalls" / "L001"
-        ).glob(f"C*.1/L001_1.cbcl")
-        if get_cycle(cbcl_file) in cycles_to_use
-    }
-
-    _, _, headers, _ = NovaSeqRun.read_headers(1, 1, cbcl_files)
-
     # write the new RunInfo file
-    make_run_info(run_path, output_path, n_tiles, n_bases)
-
-    data_path = output_path / "Data" / "Intensities" / "BaseCalls" / "L001"
-    data_path.mkdir(parents=True, exist_ok=True)
-
+    make_run_info(run_path, output_path, n_lanes, n_tiles, n_bases)
+    # write the new locs file
     subset_locs(run_path, output_path, n_reads)
 
-    filter_sums = subset_filters(run_path, data_path, n_tiles, n_reads)
+    for lane in range(1, n_lanes + 1):
+        cbcl_files = {
+            get_cycle(cbcl_file): cbcl_file
+            for cbcl_file in (
+                run_path / "Data" / "Intensities" / "BaseCalls" / f"L00{lane}"
+            ).glob(f"C*.1/L00{lane}_1.cbcl")
+            if get_cycle(cbcl_file) in cycles_to_use
+        }
 
-    # write cycles
-    for c in cycles_to_use:
-        (data_path / f"C{cycles_to_use[c]}.1").mkdir(exist_ok=True)
+        _, _, headers, _ = NovaSeqRun.read_headers(lane, 1, cbcl_files)
 
-        # take from lane 1 part 1
-        new_tiles, new_tile_offsets = subset_cycle(
-            cbcl_files[c], headers[c], filter_sums, n_tiles, n_reads
-        )
+        data_path = output_path / "Data" / "Intensities" / "BaseCalls" / f"L00{lane}"
+        data_path.mkdir(parents=True, exist_ok=True)
 
-        new_header = make_header(headers[c], new_tile_offsets)
+        filter_sums = subset_filters(run_path, data_path, lane, n_tiles, n_reads)
 
-        # make new file
-        with (data_path / f"C{cycles_to_use[c]}.1" / "L001_1.cbcl").open("wb") as out:
-            out.write(new_header)
-            out.write(new_tiles)
+        # write cycles
+        for c in cycles_to_use:
+            (data_path / f"C{cycles_to_use[c]}.1").mkdir(exist_ok=True)
+
+            # subset tiles and reads from surface 1
+            new_tiles, new_tile_offsets = subset_cycle(
+                cbcl_files[c], headers[c], filter_sums, n_tiles, n_reads
+            )
+
+            new_header = make_header(headers[c], new_tile_offsets)
+
+            # make new cbcl file
+            with (data_path / f"C{cycles_to_use[c]}.1" / f"L00{lane}_1.cbcl").open(
+                "wb"
+            ) as out:
+                out.write(new_header)
+                out.write(new_tiles)
 
 
 if __name__ == "__main__":
