@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-      expected = r#"No such file or directory"#
+        expected = r#"No such file or directory"#
     )]
     fn no_file() {
         let filename_info = Path::new("test_data/no_RunInfo.xml");
@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-      expected = r#"invalid value: string "Q", expected Y or N"#
+        expected = r#"invalid value: string "Q", expected Y or N"#
     )]
     fn weird_file() {
         let filename_info = Path::new("test_data/weird_RunInfo.xml");
@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-      expected = r#"Error parsing RunInfo: custom: 'missing field `Read`'"#
+        expected = r#"Error parsing RunInfo: custom: 'missing field `Read`'"#
     )]
     fn no_reads() {
         let filename_info = Path::new("test_data/bad_RunInfo_no_reads.xml");
@@ -303,7 +303,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-      expected = r#"Error parsing RunInfo: custom: 'missing field `Tile`'"#
+        expected = r#"Error parsing RunInfo: custom: 'missing field `Tile`'"#
     )]
     fn no_tiles() {
         let filename_info = Path::new("test_data/bad_RunInfo_no_tiles.xml");
@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-      expected = r#"1:1 Unexpected end of stream: no root element found"#
+        expected = r#"1:1 Unexpected end of stream: no root element found"#
     )]
     fn empty_file() {
         let filename_info = Path::new("test_data/empty_file");

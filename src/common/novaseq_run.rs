@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use ndarray::Array2;
 use rayon::prelude::*;
 
-use crate::run_info_parser::{Read, RunInfo, parse_run_info};
+use crate::run_info_parser::{RunInfo, parse_run_info};
 use crate::filter_decoder::{Filter, filter_decoder};
 use crate::locs_decoder::{Locs, locs_decoder};
 use crate::cbcl_header_decoder::{CBCLHeader, cbcl_header_decoder};
@@ -66,9 +66,9 @@ impl NovaSeqRun {
 
         let n_lanes = run_info.flowcell_layout.lane_count;
         let n_surfaces = run_info.flowcell_layout.surface_count;
-        let n_cycles = run_info.reads.iter().map(|v| v.num_cycles).sum::<usize>();
+        let n_cycles = run_info.reads.iter().map(|v| v.num_cycles).sum();
 
-        let read_ix = if index_only { 
+        let read_ix: Vec<(usize, usize)> = if index_only { 
             Vec::new() 
         } else {
             run_info.reads.iter()
@@ -77,7 +77,7 @@ impl NovaSeqRun {
                 .collect()
         };
 
-        let indexes: Vec<&Read> = run_info.reads.iter()
+        let indexes: Vec<_> = run_info.reads.iter()
             .filter(|r| r.is_indexed_read)
             .collect();
 
@@ -120,8 +120,7 @@ impl NovaSeqRun {
 
                 // tile numbers are not stored by surface in RunInfo, so we are
                 // taking advantage of the headers having the right names
-                let filter_and_id_vec: Vec<(Filter, Filter, Array2<u32>)>;
-                filter_and_id_vec = lane_surface_headers[0].tiles
+                let filter_and_id_vec: Vec<(_, _, _)> = lane_surface_headers[0].tiles
                     .par_chunks(tile_chunk)
                     .map( |tile_chunk| {
                         // when the tiles are not filtered, we need a combined filter 
@@ -173,8 +172,8 @@ impl NovaSeqRun {
                         };
 
                         (filter, pf_filter, read_id)
-                    }
-                ).collect();
+                    })
+                    .collect();
 
                 let mut lane_surface_filters = Vec::new();
                 let mut lane_surface_pf_filters = Vec::new();
@@ -243,10 +242,10 @@ mod tests {
 
     #[test]
     #[should_panic(
-      expected = r#"No such file or directory"#
+        expected = r#"No such file or directory"#
     )]
     fn no_run() {
         let run_path = PathBuf::from("test_data/190414_A00111_0296_AHJCWWDSXXX");
-        let _novaseq_run = NovaSeqRun::read_path(run_path, 2, false).unwrap();
+        NovaSeqRun::read_path(run_path, 2, false).unwrap();
     }
 }

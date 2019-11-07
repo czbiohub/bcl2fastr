@@ -32,10 +32,11 @@ pub fn locs_decoder(locs_path: &Path) -> std::io::Result<Locs> {
     rdr.read_f32_into::<LittleEndian>(&mut loc_buffer)?;
 
     // do the bananas conversion to get the right coordinates
-    let loc_buffer: Vec<u32> = loc_buffer.iter()
-                                         .cloned()
-                                         .map(|v| ((v as f64) * 10. + 1000.).round())
-                                         .map(|v| v as u32).collect();
+    let loc_buffer: Vec<_> = loc_buffer.iter()
+        .cloned()
+        .map(|v| ((v as f64) * 10. + 1000.).round())
+        .map(|v| v as u32)
+        .collect();
 
     let locs = loc_buffer.chunks_exact(2).map(|v| [v[0], v[1]]).collect();
 
@@ -49,7 +50,9 @@ mod tests {
 
     #[test]
     fn decode() {
-        let test_file = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/s.locs");
+        let test_file = Path::new(
+            "test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/s.locs"
+        );
         let actual_locs = locs_decoder(test_file).unwrap();
         let expected_locs = vec![
             [1000, 1000], [1018, 1000], [1036, 1000], [1054, 1000], [1072, 1000],
@@ -78,7 +81,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-      expected = r#"No such file or directory"#
+        expected = r#"No such file or directory"#
     )]
     fn no_file() {
         let test_file = Path::new("test_data/no_file.locs");
@@ -87,7 +90,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-      expected = r#"failed to fill whole buffer"#
+        expected = r#"failed to fill whole buffer"#
     )]
     fn empty_file() {
         let test_file = Path::new("test_data/empty_file");
@@ -96,7 +99,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-      expected = r#"failed to fill whole buffer"#
+        expected = r#"failed to fill whole buffer"#
     )]
     fn bad_8_bytes() {
         let test_file = Path::new("test_data/bad_data_8.bin");
@@ -105,7 +108,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-      expected = r#"failed to fill whole buffer"#
+        expected = r#"failed to fill whole buffer"#
     )]
     fn bad_12_bytes() {
         let test_file = Path::new("test_data/bad_data_12.bin");

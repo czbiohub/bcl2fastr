@@ -61,7 +61,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-      expected = r#"No such file or directory"#
+        expected = r#"No such file or directory"#
     )]
     fn no_file() {
         let test_file = Path::new("test_data/no_file.filter");
@@ -70,7 +70,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-      expected = r#"failed to fill whole buffer"#
+        expected = r#"failed to fill whole buffer"#
     )]
     fn empty_file() {
         let test_file = Path::new("test_data/empty_file");
@@ -79,7 +79,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-      expected = r#"failed to fill whole buffer"#
+        expected = r#"failed to fill whole buffer"#
     )]
     fn bad_8_bytes() {
         let test_file = Path::new("test_data/bad_data_8.bin");
@@ -88,7 +88,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-      expected = r#"failed to fill whole buffer"#
+        expected = r#"failed to fill whole buffer"#
     )]
     fn bad_12_bytes() {
         let test_file = Path::new("test_data/bad_data_12.bin");

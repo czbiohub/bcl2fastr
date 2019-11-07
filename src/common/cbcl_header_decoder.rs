@@ -64,35 +64,40 @@ impl CBCLHeader {
         rdr.read_u32_into::<LittleEndian>(&mut bin_buffer)?;
 
         let bins = bin_buffer.chunks_exact(2)
-                             .map(|bc| [bc[0] as u8, bc[1].max(2) as u8 + 33])
-                             .collect();
+            .map(|bc| [bc[0] as u8, bc[1].max(2) as u8 + 33])
+            .collect();
 
         let num_tile_records = rdr.read_u32::<LittleEndian>()?;
         let mut tile_buffer = vec![0u32; (4 * num_tile_records) as usize];
         rdr.read_u32_into::<LittleEndian>(&mut tile_buffer)?;
 
         let tile_offsets: Vec<[u32; 4]> = tile_buffer.chunks_exact(4)
-                                                     .map(|tc| [tc[0], tc[1], tc[2], tc[3]])
-                                                     .collect();
+            .map(|tc| [tc[0], tc[1], tc[2], tc[3]])
+            .collect();
 
         let non_pf_clusters_excluded = rdr.read_u8()? != 0;
 
         let tiles: Vec<u32> = tile_offsets.iter().map(|t| t[0]).collect();
 
-        let start_pos = tile_offsets.iter().scan(
-            header_size,
-            |pos, &t| {
-                *pos += t[3];
-                Some(*pos - t[3])
-            }
-        ).step_by(tile_chunk).map(|v| v as u64).collect();
+        let start_pos = tile_offsets.iter()
+            .scan(
+                header_size,
+                |pos, &t| {
+                    *pos += t[3];
+                    Some(*pos - t[3])
+                }
+            )
+            .step_by(tile_chunk)
+            .map(|v| v as u64)
+            .collect();
 
         let uncompressed_size: Vec<usize> = tile_offsets.chunks(tile_chunk)
-                                                        .map(|c| c.iter().map(|v| v[2]).sum::<u32>() as usize)
-                                                        .collect();
+            .map(|c| c.iter().map(|v| v[2]).sum::<u32>() as usize)
+            .collect();
+
         let compressed_size: Vec<usize> = tile_offsets.chunks(tile_chunk)
-                                                      .map(|c| c.iter().map(|v| v[3]).sum::<u32>() as usize)
-                                                      .collect();
+            .map(|c| c.iter().map(|v| v[3]).sum::<u32>() as usize)
+            .collect();
 
         Ok(CBCLHeader {
             cbcl_path: cbcl_path.to_path_buf(),
@@ -162,7 +167,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-      expected = r#"No such file or directory"#
+        expected = r#"No such file or directory"#
     )]
     fn no_file() {
         let cbcl_path = Path::new("test_data/no_file.cbcl");
@@ -171,7 +176,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-      expected = r#"failed to fill whole buffer"#
+        expected = r#"failed to fill whole buffer"#
     )]
     fn bad_file() {
         let cbcl_path = Path::new("test_data/bad_data_8.bin");

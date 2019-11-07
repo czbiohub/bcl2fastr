@@ -172,7 +172,7 @@ pub fn index_count(
                 }
             ).reduce(
                 Counter::new,
-                |a,b| a + b
+                |a, b| a + b
             );
 
             println!("done, adding to counts");
@@ -223,7 +223,7 @@ pub fn extract_samples(
                         .zip(qscores.axis_iter(Axis(1)))
                         .zip(rid.axis_iter(Axis(0))) {
 
-                        let index_str: Vec<String> = novaseq_run.index_ix
+                        let index_str: Vec<_> = novaseq_run.index_ix
                             .iter()
                             .cloned()
                             .map( |(is, ie)| 
@@ -308,7 +308,7 @@ mod tests {
         let header = &novaseq_run.headers.get(&(1, 1)).unwrap()[0];
         let filter = &novaseq_run.filters.get(&(1, 1)).unwrap()[0];
 
-        let bq_pairs: Vec<(u8, u8)> = super::process_tiles(
+        let bq_pairs: Vec<_> = super::process_tiles(
             header, filter, 0
         ).unwrap().into_iter().take(8).collect();
 
@@ -325,9 +325,33 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(
+        expected = r#"No such file or directory"#
+    )]
+    fn index_count_bad_path() {
+        let run_path = PathBuf::from("test_data/190414_A00111_0296_AHJCWWDSXX");
+        let output_path = PathBuf::from("test_data/wrong_test_output");
+        let novaseq_run = NovaSeqRun::read_path(run_path, 2, true).unwrap();
+
+        super::index_count(novaseq_run, output_path, 384).unwrap()
+    }
+
+    #[test]
     fn extract_samples() {
         let run_path = PathBuf::from("test_data/190414_A00111_0296_AHJCWWDSXX");
         let output_path = PathBuf::from("test_data/test_output");
+        let novaseq_run = NovaSeqRun::read_path(run_path, 2, false).unwrap();
+
+        super::extract_samples(novaseq_run, output_path).unwrap()
+    }
+
+    #[test]
+    #[should_panic(
+        expected = r#"No such file or directory"#
+    )]
+    fn extract_samples_bad_path() {
+        let run_path = PathBuf::from("test_data/190414_A00111_0296_AHJCWWDSXX");
+        let output_path = PathBuf::from("test_data/bad_test_output");
         let novaseq_run = NovaSeqRun::read_path(run_path, 2, false).unwrap();
 
         super::extract_samples(novaseq_run, output_path).unwrap()
