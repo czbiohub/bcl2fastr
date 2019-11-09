@@ -166,6 +166,19 @@ mod tests {
     }
 
     #[test]
+    fn qscore() {
+        let cbcl_path = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/BaseCalls/L001/C1.1/L001_1.cbcl");
+        let actual_cbclheader = cbcl_header_decoder(cbcl_path, 2).unwrap();
+
+        let expected_qscores = vec![b'#', b',', b':', b'F', b'#'];
+        let actual_qscores: Vec<_> = [0, 1, 2, 3, 4].iter()
+            .map(|&b| actual_cbclheader.decode_qscore(b))
+            .collect();
+
+        assert_eq!(actual_qscores, expected_qscores);
+    }
+
+    #[test]
     #[should_panic(
         expected = r#"No such file or directory"#
     )]

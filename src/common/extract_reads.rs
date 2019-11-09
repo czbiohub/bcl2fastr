@@ -4,17 +4,12 @@ use std::{
     fs::File,
     io::prelude::*,
     io::SeekFrom,
-    path::PathBuf
 };
+
 use flate2::read::MultiGzDecoder;
-use flate2::write::GzEncoder;
 use ndarray::{Array2, ArrayView, Axis};
-use counter::Counter;
-use rayon::prelude::*;
 
 use crate::cbcl_header_decoder::CBCLHeader;
-use crate::filter_decoder::Filter;
-use crate::novaseq_run::NovaSeqRun;
 
 
 /// unpacks a single byte into four 2-bit integers
@@ -29,17 +24,17 @@ fn unpack_byte(b: &u8) -> Vec<(u8, u8)> {
 
 
 /// converts from 0..3 values to the appropriate base, or N if the qscore is too low
-fn u8_to_base(b: u8, q: u8) -> u8 {
+fn u8_to_base(b: u8, q: u8) -> (u8, u8) {
     if q <= 35 {
-        return b'N'
+        return (b'N', q)
     }
 
     match b {
-        0 => b'A',
-        1 => b'C',
-        2 => b'G',
-        3 => b'T',
-        _ => b'N'
+        0 => (b'A', q),
+        1 => (b'C', q),
+        2 => (b'G', q),
+        3 => (b'T', q),
+        _ => (b'N', q)
     }
 }
 
@@ -69,7 +64,7 @@ fn extract_tiles(header: &CBCLHeader, i: usize) -> std::io::Result<Vec<u8>> {
 
 /// given a CBCL file and some tiles: extract, translate and filter the bases+scores
 fn process_tiles(
-    header: &CBCLHeader, filter: &Filter, i: usize,
+    header: &CBCLHeader, filter: &[bool], i: usize,
 ) -> std::io::Result<Vec<(u8, u8)>> {
     let uncomp_bytes = extract_tiles(header, i)?;
 
@@ -87,7 +82,7 @@ fn process_tiles(
 
 /// Create arrays of read and qscore values from a set of tiles
 pub fn extract_reads(
-    headers: &[CBCLHeader], filter: &Filter, pf_filter: &Filter, i: usize,
+    headers: &[CBCLHeader], filter: &[bool], pf_filter: &[bool], i: usize,
 ) -> std::io::Result<(Array2<u8>, Array2<u8>)> {
     let n_pf = pf_filter.iter().map(|&b| if b { 1 } else { 0 }).sum::<usize>();
     let n_cycles = headers.len();
@@ -101,11 +96,10 @@ pub fn extract_reads(
 
         let h_filter = if h.non_pf_clusters_excluded { pf_filter } else { filter };
 
-        if let Ok(tile_bytes) = process_tiles(&h, &h_filter, i) {
+        if let Ok(tile_bytes) = process_tiles(h, h_filter, i) {
             let (b_array, q_array): (Vec<u8>, Vec<u8>) = tile_bytes.iter()
                 .cloned()
-                .map(|(b, q)| (b, h.decode_qscore(q)))
-                .map(|(b, q)| (u8_to_base(b, q), q))
+                .map(|(b, q)| u8_to_base(b, h.decode_qscore(q)))
                 .unzip();
 
             read_row.assign(&ArrayView::from(&b_array));
@@ -117,159 +111,12 @@ pub fn extract_reads(
 }
 
 
-/// Iterate through all lanes and surfaces and count indexes
-pub fn index_count(
-    novaseq_run: NovaSeqRun, output_path: PathBuf, top_n_counts: usize
-) -> Result<(), &'static str> {
-    let mut out_file = match File::create(
-        output_path.join("index_counts.txt")
-        ) {
-            Ok(out_file) => out_file,
-            Err(e) => panic!("Error creating file: {}", e),
-        };
-
-    let top_8n_counts = top_n_counts * 8;
-    let mut counts: Counter<String> = Counter::new();
-
-    for lane in 1..=novaseq_run.run_info.flowcell_layout.lane_count {
-        for surface in 1..=novaseq_run.run_info.flowcell_layout.surface_count {
-            println!("indexing lane {} surface {}", lane, surface);
-            let headers = novaseq_run.headers.get(&(lane, surface)).unwrap();
-            let filters = novaseq_run.filters.get(&(lane, surface)).unwrap();
-            let pf_filters = novaseq_run.pf_filters.get(&(lane, surface)).unwrap();
-
-            let this_count: Counter<String> = filters.par_iter()
-                .zip(pf_filters)
-                .enumerate()
-                .filter_map( |(i, (filter, pf_filter))| {
-                    if let Ok((reads, _)) = extract_reads(&headers, filter, pf_filter, i) {
-                        let this_count: Counter<String> = reads.axis_iter(Axis(1))
-                            .map( |r_row| {
-                                let index_str: Vec<String> = novaseq_run.index_ix
-                                    .iter()
-                                    .cloned()
-                                    .map( |(is, ie)|
-                                        r_row.slice(ndarray::s![is..ie]).to_vec()
-                                    )
-                                    .map( |v| 
-                                        unsafe { String::from_utf8_unchecked(v) }
-                                    ).collect();
-
-                                index_str.join("+")
-                            }
-                        ).collect();
-
-                        let this_count: Counter<String> = this_count.most_common()
-                            .iter()
-                            .take(top_8n_counts)
-                            .cloned()
-                            .collect();
-
-                        Some(this_count)
-                    } else {
-                        None
-                    }
-                }
-            ).reduce(
-                Counter::new,
-                |a, b| a + b
-            );
-
-            println!("done, adding to counts");
-            counts += this_count;
-        }
-    }
-
-    for (elem, freq) in counts.most_common_ordered().iter().take(top_n_counts) {
-        writeln!(&mut out_file, "{}\t{}", elem, freq).unwrap();
-    }
-
-    Ok(())
-}
-
-
-/// Iterate through all lanes and surfaces of a run and extract tiles in chunks
-pub fn extract_samples(
-    novaseq_run: NovaSeqRun, output_path: PathBuf
-) -> Result<(), &'static str> {
-    let mut gz_writers = Vec::new();
-    for i in 1..=novaseq_run.read_ix.len() {
-        let out_file = match File::create(
-            output_path.join(format!("Undetermined_R{}.fastq.gz", i))
-        ) {
-            Ok(out_file) => out_file,
-            Err(e) => panic!("Error creating file: {}", e),
-        };
-
-        let gz_writer = GzEncoder::new(out_file, flate2::Compression::new(9));
-
-        gz_writers.push(gz_writer);
-    }
-
-    
-    for lane in 1..=novaseq_run.run_info.flowcell_layout.lane_count {
-        for surface in 1..=novaseq_run.run_info.flowcell_layout.surface_count {
-            let headers = novaseq_run.headers.get(&(lane, surface)).unwrap();
-            let filters = novaseq_run.filters.get(&(lane, surface)).unwrap();
-            let pf_filters = novaseq_run.pf_filters.get(&(lane, surface)).unwrap();
-            let read_ids = novaseq_run.read_ids.get(&(lane, surface)).unwrap();
-
-            for (i, ((filter, pf_filter), rid)) in filters.iter()
-                                                          .zip(pf_filters)
-                                                          .zip(read_ids)
-                                                          .enumerate() {
-                if let Ok((reads, qscores)) = extract_reads(&headers, filter, pf_filter, i) {
-                    for ((r_row, q_row), id_row) in reads.axis_iter(Axis(1))
-                        .zip(qscores.axis_iter(Axis(1)))
-                        .zip(rid.axis_iter(Axis(0))) {
-
-                        let index_str: Vec<_> = novaseq_run.index_ix
-                            .iter()
-                            .cloned()
-                            .map( |(is, ie)| 
-                                r_row.slice(ndarray::s![is..ie]).to_vec()
-                            ).map( |v|
-                                unsafe { String::from_utf8_unchecked(v) }
-                            ).collect();
-
-                        let index_str = index_str.join("+");
-
-                        for (i, (rs, re)) in novaseq_run.read_ix.iter()
-                                                                .cloned()
-                                                                .enumerate() {
-                            write!(
-                                &mut gz_writers[i],
-                                "{}:{}:{}:{}:{} {}:N:0:{}\n",
-                                novaseq_run.run_id,
-                                lane,
-                                id_row[0],
-                                id_row[1],
-                                id_row[2],
-                                i + 1,
-                                index_str,
-                            ).unwrap();
-
-                            gz_writers[i].write_all(&r_row.slice(ndarray::s![rs..re]).to_vec()).unwrap();
-                            gz_writers[i].write_all(b"\n+\n").unwrap();
-                            gz_writers[i].write_all(&q_row.slice(ndarray::s![rs..re]).to_vec()).unwrap();
-                            gz_writers[i].write_all(b"\n").unwrap();
-                        }
-                    }
-                };
-            }
-        }
-    }
-
-    Ok(())
-}
-
-
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::PathBuf;
 
     use crate::cbcl_header_decoder::cbcl_header_decoder;
+    use crate::novaseq_run::NovaSeqRun;
 
     #[test]
     fn extract_tiles() {
@@ -308,52 +155,11 @@ mod tests {
         let header = &novaseq_run.headers.get(&(1, 1)).unwrap()[0];
         let filter = &novaseq_run.filters.get(&(1, 1)).unwrap()[0];
 
-        let bq_pairs: Vec<_> = super::process_tiles(
-            header, filter, 0
-        ).unwrap().into_iter().take(8).collect();
+        let bq_pairs: Vec<_> = super::process_tiles(header, filter, 0).unwrap()
+            .into_iter()
+            .take(8)
+            .collect();
 
         assert_eq!(bq_pairs, expected_bq_pairs)
-    }
-
-    #[test]
-    fn index_count() {
-        let run_path = PathBuf::from("test_data/190414_A00111_0296_AHJCWWDSXX");
-        let output_path = PathBuf::from("test_data/test_output");
-        let novaseq_run = NovaSeqRun::read_path(run_path, 2, true).unwrap();
-
-        super::index_count(novaseq_run, output_path, 384).unwrap()
-    }
-
-    #[test]
-    #[should_panic(
-        expected = r#"No such file or directory"#
-    )]
-    fn index_count_bad_path() {
-        let run_path = PathBuf::from("test_data/190414_A00111_0296_AHJCWWDSXX");
-        let output_path = PathBuf::from("test_data/wrong_test_output");
-        let novaseq_run = NovaSeqRun::read_path(run_path, 2, true).unwrap();
-
-        super::index_count(novaseq_run, output_path, 384).unwrap()
-    }
-
-    #[test]
-    fn extract_samples() {
-        let run_path = PathBuf::from("test_data/190414_A00111_0296_AHJCWWDSXX");
-        let output_path = PathBuf::from("test_data/test_output");
-        let novaseq_run = NovaSeqRun::read_path(run_path, 2, false).unwrap();
-
-        super::extract_samples(novaseq_run, output_path).unwrap()
-    }
-
-    #[test]
-    #[should_panic(
-        expected = r#"No such file or directory"#
-    )]
-    fn extract_samples_bad_path() {
-        let run_path = PathBuf::from("test_data/190414_A00111_0296_AHJCWWDSXX");
-        let output_path = PathBuf::from("test_data/bad_test_output");
-        let novaseq_run = NovaSeqRun::read_path(run_path, 2, false).unwrap();
-
-        super::extract_samples(novaseq_run, output_path).unwrap()
     }
 }

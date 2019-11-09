@@ -143,9 +143,9 @@ where
 #[derive(Debug, PartialEq, Eq)]
 pub struct FlowcellLayout {
     /// Number of lanes
-    pub lane_count: u32,
+    pub lane_count: usize,
     /// Number of surfaces per lane
-    pub surface_count: u32,
+    pub surface_count: usize,
     /// Swathes per lane
     pub swath_count: u64,
     /// Number of tiles per swath
@@ -169,9 +169,9 @@ impl<'de> Deserialize<'de> for FlowcellLayout {
         #[derive(Deserialize)]
         struct Outer {
             #[serde(rename = "LaneCount")]
-            lane_count: u32,
+            lane_count: usize,
             #[serde(rename = "SurfaceCount")]
-            surface_count: u32,
+            surface_count: usize,
             #[serde(rename = "SwathCount")]
             swath_count: u64,
             #[serde(rename = "TileCount")]

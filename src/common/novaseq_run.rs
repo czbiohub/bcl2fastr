@@ -4,7 +4,6 @@
 use std::path::PathBuf;
 use std::collections::HashMap;
 
-use ndarray::Array2;
 use rayon::prelude::*;
 
 use crate::run_info_parser::{RunInfo, parse_run_info};
@@ -29,15 +28,15 @@ pub struct NovaSeqRun {
     /// a single universal locs array, same for every tile
     pub locs: Locs,
     /// a map from (lane, surface) tuples to vectors of filters
-    pub filters: HashMap<(u32, u32), Vec<Filter>>,
+    pub filters: HashMap<(usize, usize), Vec<Filter>>,
     /// a map from (lane, surface) tuples to vectors of post-filter "filters"
     /// which are needed to remove empty half-bytes at the end of tiles
-    pub pf_filters: HashMap<(u32, u32), Vec<Filter>>,
-    /// a map from (lane, surface) tuples to vectors of indexes into locs
-    /// for the combined filters
-    pub read_ids: HashMap<(u32, u32), Vec<Array2<u32>>>,
+    pub pf_filters: HashMap<(usize, usize), Vec<Filter>>,
+    /// a map from (lane, surface) tuples to vectors of id strings for
+    /// producing the read headers
+    pub read_ids: HashMap<(usize, usize), Vec<Vec<String>>>,
     /// a map from (lane, surface) tuples to vectors of CBCL headers
-    pub headers: HashMap<(u32, u32), Vec<CBCLHeader>>,
+    pub headers: HashMap<(usize, usize), Vec<CBCLHeader>>,
 }
 
 
@@ -51,10 +50,7 @@ impl NovaSeqRun {
     ) -> std::io::Result<NovaSeqRun> {
         let run_info = parse_run_info(&run_path.join("RunInfo.xml"))?;
         let run_id = format!(
-            "@{}:{}:{}",
-            run_info.instrument,
-            run_info.number,
-            run_info.flowcell,
+            "@{}:{}:A{}", run_info.instrument, run_info.number, run_info.flowcell,
         );
 
         let locs = locs_decoder(&run_path.join("Data/Intensities/s.locs"))?;
@@ -129,7 +125,7 @@ impl NovaSeqRun {
                         // when the tiles are already filtered, we need to take into 
                         // account any half-packed bytes at the end of each filter
                         let mut pf_filter = Filter::new();
-                        let mut read_id: Vec<[u32; 3]> = Vec::new();
+                        let mut read_id = Vec::new();
 
                         for tile in tile_chunk {
                             let filter_path = run_path.join(
@@ -142,18 +138,29 @@ impl NovaSeqRun {
                             );
                             let tile_filter = filter_decoder(&filter_path).unwrap();
 
-                            read_id.extend(tile_filter.iter().enumerate().filter_map(
-                                |(i, &b)|
-                                if b {
-                                    Some([tile.clone(), locs[i][0], locs[i][1]])
-                                } else {
-                                    None
-                                }
-                            ));
+                            read_id.extend(
+                                tile_filter.iter().enumerate().filter_map(
+                                    |(i, &b)|
+                                    if b {
+                                        Some(
+                                            format!(
+                                                "{}:{}:{}:{}:{}",
+                                                run_id,
+                                                lane,
+                                                tile,
+                                                locs[i][0],
+                                                locs[i][1]
+                                            )
+                                        )
+                                    } else {
+                                        None
+                                    }
+                                )
+                            );
 
-                            let n_pf = tile_filter.iter().map(
-                                |&b| if b { 1 } else { 0 }
-                            ).sum::<usize>();
+                            let n_pf = tile_filter.iter()
+                                .map( |&b| if b { 1 } else { 0 } )
+                                .sum();
 
                             pf_filter.extend(std::iter::repeat(true).take(n_pf));
                             if n_pf % 2 == 1 {
@@ -162,14 +169,6 @@ impl NovaSeqRun {
 
                             filter.extend(tile_filter);
                         }
-
-                        // store read_id information consisting of tile number & xy locs
-                        let read_id: Array2<u32> = match Array2::from_shape_vec(
-                            (read_id.len(), 3), read_id.iter().flatten().cloned().collect()
-                        ) {
-                            Ok(a) => a,
-                            Err(e) => panic!("Failed to create read_id array: {}", e)
-                        };
 
                         (filter, pf_filter, read_id)
                     })
@@ -223,7 +222,7 @@ mod tests {
         let expected_index_ix = vec![(4, 12), (12, 20)];
         let novaseq_run = NovaSeqRun::read_path(run_path, 2, false).unwrap();
 
-        assert_eq!(novaseq_run.run_id, "@A00111:296:HJCWWDSXX");
+        assert_eq!(novaseq_run.run_id, "@A00111:296:AHJCWWDSXX");
         assert_eq!(novaseq_run.read_ix, expected_read_ix);
         assert_eq!(novaseq_run.index_ix, expected_index_ix);
     }
@@ -235,7 +234,7 @@ mod tests {
         let expected_index_ix = vec![(0, 8), (8, 16)];
         let novaseq_run = NovaSeqRun::read_path(run_path, 2, true).unwrap();
 
-        assert_eq!(novaseq_run.run_id, "@A00111:296:HJCWWDSXX");
+        assert_eq!(novaseq_run.run_id, "@A00111:296:AHJCWWDSXX");
         assert_eq!(novaseq_run.read_ix, expected_read_ix);
         assert_eq!(novaseq_run.index_ix, expected_index_ix);
     }
