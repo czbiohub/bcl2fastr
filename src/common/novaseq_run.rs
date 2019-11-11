@@ -32,9 +32,9 @@ pub struct NovaSeqRun {
     /// a map from (lane, surface) tuples to vectors of post-filter "filters"
     /// which are needed to remove empty half-bytes at the end of tiles
     pub pf_filters: HashMap<(usize, usize), Vec<Filter>>,
-    /// a map from (lane, surface) tuples to vectors of id strings for
-    /// producing the read headers
-    pub read_ids: HashMap<(usize, usize), Vec<Vec<String>>>,
+    /// a map from (lane, surface) tuples to vectors of tiles, so we can produce
+    /// the read header
+    pub tile_ids: HashMap<(usize, usize), Vec<Vec<(u32, usize)>>>,
     /// a map from (lane, surface) tuples to vectors of CBCL headers
     pub headers: HashMap<(usize, usize), Vec<CBCLHeader>>,
 }
@@ -53,12 +53,14 @@ impl NovaSeqRun {
             "@{}:{}:A{}", run_info.instrument, run_info.number, run_info.flowcell,
         );
 
+        // need to repeat locs for each tile in tile_chunk
         let locs = locs_decoder(&run_path.join("Data/Intensities/s.locs"))?;
+        let locs = locs.iter().cycle().take(locs.len() * tile_chunk).cloned().collect();
 
         let mut headers = HashMap::new();
         let mut filters = HashMap::new();
         let mut pf_filters = HashMap::new();
-        let mut read_ids = HashMap::new();
+        let mut tile_ids = HashMap::new();
 
         let n_lanes = run_info.flowcell_layout.lane_count;
         let n_surfaces = run_info.flowcell_layout.surface_count;
@@ -125,7 +127,7 @@ impl NovaSeqRun {
                         // when the tiles are already filtered, we need to take into 
                         // account any half-packed bytes at the end of each filter
                         let mut pf_filter = Filter::new();
-                        let mut read_id = Vec::new();
+                        let mut tile_id = Vec::new();
 
                         for tile in tile_chunk {
                             let filter_path = run_path.join(
@@ -138,29 +140,11 @@ impl NovaSeqRun {
                             );
                             let tile_filter = filter_decoder(&filter_path).unwrap();
 
-                            read_id.extend(
-                                tile_filter.iter().enumerate().filter_map(
-                                    |(i, &b)|
-                                    if b {
-                                        Some(
-                                            format!(
-                                                "{}:{}:{}:{}:{}",
-                                                run_id,
-                                                lane,
-                                                tile,
-                                                locs[i][0],
-                                                locs[i][1]
-                                            )
-                                        )
-                                    } else {
-                                        None
-                                    }
-                                )
-                            );
-
                             let n_pf = tile_filter.iter()
                                 .map( |&b| if b { 1 } else { 0 } )
                                 .sum();
+
+                            tile_id.push((tile.clone(), n_pf));
 
                             pf_filter.extend(std::iter::repeat(true).take(n_pf));
                             if n_pf % 2 == 1 {
@@ -170,18 +154,18 @@ impl NovaSeqRun {
                             filter.extend(tile_filter);
                         }
 
-                        (filter, pf_filter, read_id)
+                        (filter, pf_filter, tile_id)
                     })
                     .collect();
 
                 let mut lane_surface_filters = Vec::new();
                 let mut lane_surface_pf_filters = Vec::new();
-                let mut lane_surface_read_ids = Vec::new();
+                let mut lane_surface_tile_ids = Vec::new();
 
-                for (filter, pf_filter, read_id) in filter_and_id_vec {
+                for (filter, pf_filter, tile_id) in filter_and_id_vec {
                     lane_surface_filters.push(filter);
                     lane_surface_pf_filters.push(pf_filter);
-                    lane_surface_read_ids.push(read_id);
+                    lane_surface_tile_ids.push(tile_id);
                 }
 
                 println!("loaded {} filters and ids", lane_surface_filters.len());
@@ -189,7 +173,7 @@ impl NovaSeqRun {
                 headers.insert((lane, surface), lane_surface_headers);
                 filters.insert((lane, surface), lane_surface_filters);
                 pf_filters.insert((lane, surface), lane_surface_pf_filters);
-                read_ids.insert((lane, surface), lane_surface_read_ids);
+                tile_ids.insert((lane, surface), lane_surface_tile_ids);
             }
         }
 
@@ -202,7 +186,7 @@ impl NovaSeqRun {
             locs,
             filters,
             pf_filters,
-            read_ids,
+            tile_ids,
             headers,
         };
 

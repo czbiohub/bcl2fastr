@@ -7,34 +7,37 @@ use std::{
 };
 
 use flate2::read::MultiGzDecoder;
-use ndarray::{Array2, ArrayView, Axis};
+use ndarray::{Array3, ArrayView, ArrayViewMut2, Axis};
 
 use crate::cbcl_header_decoder::CBCLHeader;
 
 
-/// unpacks a single byte into four 2-bit integers
-fn unpack_byte(b: &u8) -> Vec<(u8, u8)> {
-    let q_1 = (b >> 6) & 3u8;
-    let b_1 = (b >> 4) & 3u8;
-    let q_2 = (b >> 2) & 3u8;
-    let b_2 = b & 3u8;
+/// converts from 0..3 values to the appropriate base, or N if the qscore is too low
+fn u8_to_base(b: u8, q: u8) -> u8 {
+    if q <= 35 { return b'N' }
 
-    vec![(b_2, q_2), (b_1, q_1)]
+    match b {
+        0 => b'A',
+        1 => b'C',
+        2 => b'G',
+        3 => b'T',
+        _ => b'N',
+    }
 }
 
 
-/// converts from 0..3 values to the appropriate base, or N if the qscore is too low
-fn u8_to_base(b: u8, q: u8) -> (u8, u8) {
-    if q <= 35 {
-        return (b'N', q)
-    }
+/// unpacks a single byte into four 2-bit integers
+fn unpack_byte(b: &u8, filter: &[bool], header: &CBCLHeader) -> Vec<u8> {
+    let q_1 = header.decode_qscore((b >> 6) & 3u8);
+    let b_1 = u8_to_base((b >> 4) & 3u8, q_1);
+    let q_2 = header.decode_qscore((b >> 2) & 3u8);
+    let b_2 = u8_to_base(b & 3u8, q_2);
 
-    match b {
-        0 => (b'A', q),
-        1 => (b'C', q),
-        2 => (b'G', q),
-        3 => (b'T', q),
-        _ => (b'N', q)
+    match filter {
+        [true, true] => vec![b_2, q_2, b_1, q_1],
+        [true, false] =>  vec![b_2, q_2],
+        [false, true] =>  vec![b_1, q_1],
+        _ => vec![],
     }
 }
 
@@ -45,10 +48,11 @@ fn extract_tiles(header: &CBCLHeader, i: usize) -> std::io::Result<Vec<u8>> {
     let uncompressed_size = header.uncompressed_size[i];
     let compressed_size = header.compressed_size[i];
 
-    // open file and read whole file into a buffer
+    // open file and seek to start position
     let mut cbcl = File::open(&header.cbcl_path)?;
     cbcl.seek(SeekFrom::Start(start_pos))?;
 
+    // read the compressed data for specified tile(s)
     let mut read_buffer = vec![0u8; compressed_size];
     cbcl.read_exact(&mut read_buffer)?;
 
@@ -64,59 +68,69 @@ fn extract_tiles(header: &CBCLHeader, i: usize) -> std::io::Result<Vec<u8>> {
 
 /// given a CBCL file and some tiles: extract, translate and filter the bases+scores
 fn process_tiles(
-    header: &CBCLHeader, filter: &[bool], i: usize,
-) -> std::io::Result<Vec<(u8, u8)>> {
-    let uncomp_bytes = extract_tiles(header, i)?;
+    byte_vec: &mut Vec<u8>,
+    bq_array: &mut ArrayViewMut2<u8>,
+    header: &CBCLHeader,
+    filter: &[bool],
+    i: usize,
+) -> () {
+    if let Ok(uncomp_bytes) = extract_tiles(header, i) {
+        // unpack the bytes, filtering out the reads that didn't pass
+        byte_vec.extend(
+            uncomp_bytes.iter()
+                .zip(filter.chunks(2))
+                .flat_map(|(v, f)| unpack_byte(v, f, header))
+        );
 
-    // unpack the bytes into tuples (two per byte), then use the filter to filter 
-    let bq_pairs = uncomp_bytes.iter()
-        .map(|v| unpack_byte(v))
-        .flatten()
-        .zip(filter)
-        .filter_map(|(v, &b)| if b { Some(v) } else { None })
-        .collect();
-
-    Ok(bq_pairs)
+        bq_array.assign(&ArrayView::from_shape(bq_array.raw_dim(), byte_vec).unwrap());
+        byte_vec.clear();
+    }
 }
 
 
 /// Create arrays of read and qscore values from a set of tiles
 pub fn extract_reads(
     headers: &[CBCLHeader], filter: &[bool], pf_filter: &[bool], i: usize,
-) -> std::io::Result<(Array2<u8>, Array2<u8>)> {
+) -> Array3<u8> {
     let n_pf = pf_filter.iter().map(|&b| if b { 1 } else { 0 }).sum::<usize>();
     let n_cycles = headers.len();
 
-    let mut read_array = Array2::from_elem((n_cycles, n_pf), b'N');
-    let mut qscore_array = Array2::from_elem((n_cycles, n_pf), b'#');
+    // preallocate a vector for bases/qscores
+    let mut byte_vec = Vec::with_capacity(n_pf * 2);
 
-    for (j, h) in headers.iter().enumerate() {
-        let mut read_row = read_array.index_axis_mut(Axis(0), j);
-        let mut qscore_row = qscore_array.index_axis_mut(Axis(0), j);
+    // preallocate an array for total output, with default values
+    let mut out_array = Array3::zeros((n_cycles, n_pf, 2));
 
+    out_array.index_axis_mut(Axis(2), 0).fill(b'N');
+    out_array.index_axis_mut(Axis(2), 1).fill(b'#');
+
+    for (mut row, h) in out_array.axis_iter_mut(Axis(0)).zip(headers) {
         let h_filter = if h.non_pf_clusters_excluded { pf_filter } else { filter };
 
-        if let Ok(tile_bytes) = process_tiles(h, h_filter, i) {
-            let (b_array, q_array): (Vec<u8>, Vec<u8>) = tile_bytes.iter()
-                .cloned()
-                .map(|(b, q)| u8_to_base(b, h.decode_qscore(q)))
-                .unzip();
-
-            read_row.assign(&ArrayView::from(&b_array));
-            qscore_row.assign(&ArrayView::from(&q_array));
-        };
+        process_tiles(&mut byte_vec, &mut row, h, h_filter, i);
     }
 
-    Ok((read_array, qscore_array))
+    out_array
 }
 
 
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use ndarray::Array2;
 
     use crate::cbcl_header_decoder::cbcl_header_decoder;
     use crate::novaseq_run::NovaSeqRun;
+
+    #[test]
+    fn u8_to_base() {
+        let expected_bases = vec![b'A', b'C', b'G', b'T', b'N'];
+        let actual_bases: Vec<_> = [0, 1, 2, 3, 4].iter()
+            .map(|&b| super::u8_to_base(b, 70))
+            .collect();
+
+        assert_eq!(actual_bases, expected_bases);
+    }
 
     #[test]
     fn extract_tiles() {
@@ -149,16 +163,21 @@ mod tests {
         let novaseq_run = NovaSeqRun::read_path(run_path, 2, false).unwrap();
 
         let expected_bq_pairs = vec![
-            (3, 3), (0, 3), (1, 3), (1, 3), (1, 3), (0, 3), (1, 2), (1, 3)
+            84, 70, 65, 70, 67, 70, 67, 70, 67, 70, 65, 70, 67, 58, 67, 70
         ];
 
         let header = &novaseq_run.headers.get(&(1, 1)).unwrap()[0];
         let filter = &novaseq_run.filters.get(&(1, 1)).unwrap()[0];
 
-        let bq_pairs: Vec<_> = super::process_tiles(header, filter, 0).unwrap()
-            .into_iter()
-            .take(8)
-            .collect();
+        let n_pf = filter.iter().map(|&b| if b { 1 } else { 0 }).sum();
+        let mut byte_vec = Vec::with_capacity(n_pf * 2);
+        let mut bq_array = Array2::zeros((n_pf, 2));
+
+        super::process_tiles(
+            &mut byte_vec, &mut bq_array.view_mut(), header, filter, 0
+        );
+
+        let bq_pairs: Vec<_> = bq_array.iter().cloned().take(16).collect();
 
         assert_eq!(bq_pairs, expected_bq_pairs)
     }

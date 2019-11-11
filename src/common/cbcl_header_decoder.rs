@@ -77,7 +77,7 @@ impl CBCLHeader {
 
         let non_pf_clusters_excluded = rdr.read_u8()? != 0;
 
-        let tiles: Vec<u32> = tile_offsets.iter().map(|t| t[0]).collect();
+        let tiles = tile_offsets.iter().map(|t| t[0]).collect();
 
         let start_pos = tile_offsets.iter()
             .scan(

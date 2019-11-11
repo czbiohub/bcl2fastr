@@ -22,31 +22,28 @@ fn count_tile_chunk(
     pf_filter: &[bool],
     index_ix: &[(usize, usize)],
     n_counts: usize
-) -> Option<Counter<String>> {
+) -> Counter<String> {
+    let reads_and_qscores = extract_reads(&headers, filter, pf_filter, i); 
 
-    if let Ok((reads, _)) = extract_reads(&headers, filter, pf_filter, i) {
-        let this_count: Counter<String> = reads.axis_iter(Axis(1))
-            .map( |r_row| {
-                index_ix.iter()
-                    .cloned()
-                    .map( |(is, ie)| r_row.slice(ndarray::s![is..ie]).to_vec() )
-                    .map( |v| 
-                        unsafe { String::from_utf8_unchecked(v) }
-                    ).collect::<Vec<String>>()
-                    .join("+")
-            }
-        ).collect();
+    let this_count: Counter<String> = reads_and_qscores.axis_iter(Axis(1))
+        .map( |rq_row| {
+            index_ix.iter()
+                .cloned()
+                .map( |(is, ie)| rq_row.slice(ndarray::s![is..ie, 0]).to_vec() )
+                .map( |v| 
+                    unsafe { String::from_utf8_unchecked(v) }
+                ).collect::<Vec<String>>()
+                .join("+")
+        }
+    ).collect();
 
-        let this_count: Counter<String> = this_count.most_common()
-            .iter()
-            .take(n_counts)
-            .cloned()
-            .collect();
+    let this_count: Counter<String> = this_count.most_common()
+        .iter()
+        .take(n_counts)
+        .cloned()
+        .collect();
 
-        Some(this_count)
-    } else {
-        None
-    }
+    this_count
 }
 
 
@@ -73,7 +70,7 @@ pub fn index_count(
             let this_count: Counter<String> = filters.par_iter()
                 .zip(pf_filters)
                 .enumerate()
-                .filter_map( |(i, (filter, pf_filter))| 
+                .map( |(i, (filter, pf_filter))| 
                     count_tile_chunk(i, headers, filter, pf_filter, &novaseq_run.index_ix, top_8n_counts)
                 ).reduce(
                     Counter::new,
