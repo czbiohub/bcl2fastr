@@ -21,22 +21,20 @@ pub struct NovaSeqRun {
     pub run_info: RunInfo,
     /// a string with the run info formatted for read headers
     pub run_id: String,
-    /// start and end indices for the reads
-    pub read_ix: Vec<(usize, usize)>,
-    /// start and end indices for the indexes
-    pub index_ix: Vec<(usize, usize)>,
     /// a single universal locs array, same for every tile
     pub locs: Locs,
-    /// a map from (lane, surface) tuples to vectors of filters
-    pub filters: HashMap<(usize, usize), Vec<Filter>>,
-    /// a map from (lane, surface) tuples to vectors of post-filter "filters"
+    /// a map from [lane, surface] tuples to vectors of filters
+    pub filters: HashMap<[usize; 2], Vec<Filter>>,
+    /// a map from [lane, surface] tuples to vectors of post-filter "filters"
     /// which are needed to remove empty half-bytes at the end of tiles
-    pub pf_filters: HashMap<(usize, usize), Vec<Filter>>,
-    /// a map from (lane, surface) tuples to vectors of tiles, so we can produce
+    pub pf_filters: HashMap<[usize; 2], Vec<Filter>>,
+    /// a map from [lane, surface] to vectors of tiles, so we can produce
     /// the read header
-    pub tile_ids: HashMap<(usize, usize), Vec<Vec<(u32, usize)>>>,
-    /// a map from (lane, surface) tuples to vectors of CBCL headers
-    pub headers: HashMap<(usize, usize), Vec<CBCLHeader>>,
+    pub tile_ids: HashMap<[usize; 2], Vec<Vec<(u32, usize)>>>,
+    /// a map from [lane, surface] to vectors of CBCL headers for the reads
+    pub read_headers: HashMap<[usize; 2], Vec<Vec<CBCLHeader>>>,
+    /// a map from [lane, surface] to vectors of CBCL headers for the indices
+    pub index_headers: HashMap<[usize; 2], Vec<Vec<CBCLHeader>>>,
 }
 
 
@@ -57,68 +55,54 @@ impl NovaSeqRun {
         let locs = locs_decoder(&run_path.join("Data/Intensities/s.locs"))?;
         let locs = locs.iter().cycle().take(locs.len() * tile_chunk).cloned().collect();
 
-        let mut headers = HashMap::new();
+        let mut read_headers = HashMap::new();
+        let mut index_headers = HashMap::new();
+
         let mut filters = HashMap::new();
         let mut pf_filters = HashMap::new();
         let mut tile_ids = HashMap::new();
 
-        let n_lanes = run_info.flowcell_layout.lane_count;
-        let n_surfaces = run_info.flowcell_layout.surface_count;
-        let n_cycles = run_info.reads.iter().map(|v| v.num_cycles).sum();
-
-        let read_ix: Vec<(usize, usize)> = if index_only { 
-            Vec::new() 
-        } else {
-            run_info.reads.iter()
-                .filter(|r| !r.is_indexed_read)
-                .map(|r| (r.start, r.end))
-                .collect()
-        };
-
-        let indexes: Vec<_> = run_info.reads.iter()
-            .filter(|r| r.is_indexed_read)
-            .collect();
-
-        let index_ix: Vec<(usize, usize)> = if index_only {
-            indexes.iter().scan(0, |i, r| {
-                *i += r.num_cycles;
-                Some((*i - r.num_cycles, *i))
-            }).collect()
-        } else {
-            indexes.iter().map(|r| (r.start, r.end)).collect()
-        };
-
-        let cycle_range = if index_only {
-            (indexes[0].start + 1)..=(indexes[indexes.len() - 1].end)
-        } else {
-            1..=n_cycles
-        };
-
-        for lane in 1..=n_lanes {
-            for surface in 1..=n_surfaces {
+        for lane in 1..=run_info.flowcell_layout.lane_count {
+            for surface in 1..=run_info.flowcell_layout.surface_count {
                 println!("lane {} - surface {}", lane, surface);
-                let lane_surface_headers: Vec<CBCLHeader> = cycle_range.clone()
-                    .into_par_iter()
-                    .map( |cycle| {
-                        let cbcl_path = run_path.join(
-                            format!(
-                                "Data/Intensities/BaseCalls/L{:03}/C{}.1/L{:03}_{}.cbcl",
-                                lane,
-                                cycle,
-                                lane,
-                                surface,
-                            )
-                        );
 
-                        cbcl_header_decoder(&cbcl_path, tile_chunk).unwrap()
+                let mut lane_surface_read_headers = Vec::new();
+                let mut lane_surface_index_headers = Vec::new();
+
+                for read in run_info.reads.iter() {
+                    if index_only && !read.is_indexed_read {
+                        continue
                     }
-                ).collect();
 
-                println!("loaded {} headers", lane_surface_headers.len());
+                    let these_headers: Vec<CBCLHeader> = (read.start..read.end)
+                        .into_par_iter()
+                        .map( |cycle| {
+                            let cbcl_path = run_path.join(
+                                format!(
+                                    "Data/Intensities/BaseCalls/L{:03}/C{}.1/L{:03}_{}.cbcl",
+                                    lane,
+                                    cycle,
+                                    lane,
+                                    surface,
+                                )
+                            );
+
+                            cbcl_header_decoder(&cbcl_path, tile_chunk).unwrap()
+                        }
+                    ).collect();
+
+                    if read.is_indexed_read {
+                        lane_surface_index_headers.push(these_headers);
+                    } else {
+                        lane_surface_read_headers.push(these_headers);
+                    }
+                }
+
+                // will always have index_headers, not always headers
 
                 // tile numbers are not stored by surface in RunInfo, so we are
                 // taking advantage of the headers having the right names
-                let filter_and_id_vec: Vec<(_, _, _)> = lane_surface_headers[0].tiles
+                let filter_and_id_vec: Vec<(_, _, _)> = lane_surface_index_headers[0][0].tiles
                     .par_chunks(tile_chunk)
                     .map( |tile_chunk| {
                         // when the tiles are not filtered, we need a combined filter 
@@ -170,10 +154,11 @@ impl NovaSeqRun {
 
                 println!("loaded {} filters and ids", lane_surface_filters.len());
 
-                headers.insert((lane, surface), lane_surface_headers);
-                filters.insert((lane, surface), lane_surface_filters);
-                pf_filters.insert((lane, surface), lane_surface_pf_filters);
-                tile_ids.insert((lane, surface), lane_surface_tile_ids);
+                filters.insert([lane, surface], lane_surface_filters);
+                pf_filters.insert([lane, surface], lane_surface_pf_filters);
+                tile_ids.insert([lane, surface], lane_surface_tile_ids);
+                read_headers.insert([lane, surface], lane_surface_read_headers);
+                index_headers.insert([lane, surface], lane_surface_index_headers);
             }
         }
 
@@ -181,13 +166,12 @@ impl NovaSeqRun {
             run_path,
             run_info,
             run_id,
-            read_ix,
-            index_ix,
             locs,
             filters,
             pf_filters,
             tile_ids,
-            headers,
+            read_headers,
+            index_headers,
         };
 
         Ok(novaseq_run)
@@ -202,25 +186,17 @@ mod tests {
     #[test]
     fn test_run() {
         let run_path = PathBuf::from("test_data/190414_A00111_0296_AHJCWWDSXX");
-        let expected_read_ix = vec![(0, 4), (20, 24)];
-        let expected_index_ix = vec![(4, 12), (12, 20)];
         let novaseq_run = NovaSeqRun::read_path(run_path, 2, false).unwrap();
 
         assert_eq!(novaseq_run.run_id, "@A00111:296:AHJCWWDSXX");
-        assert_eq!(novaseq_run.read_ix, expected_read_ix);
-        assert_eq!(novaseq_run.index_ix, expected_index_ix);
     }
 
     #[test]
     fn test_index_run() {
         let run_path = PathBuf::from("test_data/190414_A00111_0296_AHJCWWDSXX");
-        let expected_read_ix = vec![];
-        let expected_index_ix = vec![(0, 8), (8, 16)];
         let novaseq_run = NovaSeqRun::read_path(run_path, 2, true).unwrap();
 
         assert_eq!(novaseq_run.run_id, "@A00111:296:AHJCWWDSXX");
-        assert_eq!(novaseq_run.read_ix, expected_read_ix);
-        assert_eq!(novaseq_run.index_ix, expected_index_ix);
     }
 
     #[test]

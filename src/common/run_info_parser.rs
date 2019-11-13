@@ -76,7 +76,7 @@ impl<'de> Deserialize<'de> for RunInfo {
         {
             let reads = Reads::deserialize(deserializer)?;
 
-            let reads = reads.read.into_iter().scan(0, |i, r| {
+            let reads = reads.read.into_iter().scan(1, |i, r| {
                 *i += r.num_cycles;
                 Some(Read { start: *i - r.num_cycles, end: *i, .. r })
             }).collect();
@@ -105,7 +105,7 @@ impl<'de> Deserialize<'de> for RunInfo {
 pub struct Read {
     /// Which read this is
     #[serde(rename = "Number")]
-    pub number: u64,
+    pub number: usize,
     /// How many cycles (e.g. bases) in the read
     #[serde(rename = "NumCycles")]
     pub num_cycles: usize,
@@ -252,10 +252,10 @@ mod tests {
                 instrument: "A00111".to_owned(),
                 date: "4/14/2019 1:17:20 PM".to_owned(),
                 reads: vec![
-                    Read { number: 1, start: 0, end: 4, num_cycles: 4, is_indexed_read: false },
-                    Read { number: 2, start: 4, end: 12, num_cycles: 8, is_indexed_read: true },
-                    Read { number: 3, start: 12, end: 20, num_cycles: 8, is_indexed_read: true },
-                    Read { number: 4, start: 20, end: 24, num_cycles: 4, is_indexed_read: false },
+                    Read { number: 1, start: 1, end: 5, num_cycles: 4, is_indexed_read: false },
+                    Read { number: 2, start: 5, end: 13, num_cycles: 8, is_indexed_read: true },
+                    Read { number: 3, start: 13, end: 21, num_cycles: 8, is_indexed_read: true },
+                    Read { number: 4, start: 21, end: 25, num_cycles: 4, is_indexed_read: false },
                 ],
                 flowcell_layout: FlowcellLayout {
                     lane_count: 1,

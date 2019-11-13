@@ -12,7 +12,7 @@ use ndarray::Axis;
 use rayon::prelude::*;
 
 use crate::novaseq_run::NovaSeqRun;
-use crate::extract_reads::extract_reads;
+use crate::extract_reads::{extract_read_block, extract_indices};
 use crate::sample_data::Samples;
 
 
@@ -36,12 +36,13 @@ fn extract_sample_chunk(
     lane: usize,
     surface: usize,
 ) {
-    let headers = novaseq_run.headers.get(&(lane, surface)).unwrap();
-    let filters = novaseq_run.filters.get(&(lane, surface)).unwrap();
-    let pf_filters = novaseq_run.pf_filters.get(&(lane, surface)).unwrap();
-    let tile_ids = novaseq_run.tile_ids.get(&(lane, surface)).unwrap();
+    let read_headers = novaseq_run.read_headers.get(&[lane, surface]).unwrap();
+    let idx_headers = novaseq_run.index_headers.get(&[lane, surface]).unwrap();
+    let filters = novaseq_run.filters.get(&[lane, surface]).unwrap();
+    let pf_filters = novaseq_run.pf_filters.get(&[lane, surface]).unwrap();
+    let tile_ids = novaseq_run.tile_ids.get(&[lane, surface]).unwrap();
 
-    let mut gz_writers: Vec<_> = (1..=novaseq_run.read_ix.len())
+    let mut gz_writers: Vec<_> = (1..=read_headers.len())
         .map( |i|
             sample_chunk.sample_names.iter().map( |sample_name| {
                 let out_file = match File::create(
@@ -60,38 +61,70 @@ fn extract_sample_chunk(
         .zip(tile_ids)
         .enumerate() {
 
-        let rq_array = extract_reads(&headers, filter, pf_filter, i);
-        let locs: Vec<_> = novaseq_run.locs.iter().zip(filter).filter_map(
-            |(loc, &b)| if b { Some(loc) } else { None }
-        ).collect();
-        let tid: Vec<_> = tile_id.iter()
-            .flat_map(|(tile, n_pf)| std::iter::repeat(tile).take(*n_pf) )
+        // first read the indices alone, and use them to filter the reads
+        let indices = extract_indices(i, idx_headers, filter, pf_filter);
+
+        let sample_filter: Vec<_> = indices.iter()
+            .map(
+                |ix|
+                if let Some(_) = sample_chunk.get_sample(&ix) {
+                    true
+                } else {
+                    false
+                }
+            )
             .collect();
 
-        for (sample_name, index_str, rq_row, tile, loc) in rq_array.axis_iter(Axis(1))
-            .zip(tid)
-            .zip(locs)
-            .filter_map( |((rq_row, tile), loc)| {
-                let indices: Vec<Vec<u8>> = novaseq_run.index_ix
-                    .iter()
-                    .cloned()
-                    .map( |(is, ie)| rq_row.slice(ndarray::s![is..ie, 0]).to_vec())
-                    .collect();
+        let samples: Vec<_> = indices.iter()
+            .filter_map( |ix| sample_chunk.get_sample(&ix) )
+            .collect();
 
-                if let Some((sample_name, index_str)) = sample_chunk.get_sample(
-                    &indices
-                ) {
-                    Some((sample_name, index_str, rq_row, tile, loc))
+        let filter: Vec<_> = filter.iter()
+            .scan(0, |i, &b|
+                if b {
+                    *i += 1;
+                    Some(sample_filter[*i - 1])
                 } else {
-                    None
+                    Some(false)
                 }
-            }) {
+            )
+            .collect();
 
-            for (k, (rs, re)) in novaseq_run.read_ix.iter()
-                                                    .cloned()
-                                                    .enumerate() {
+        let pf_filter: Vec<_> = pf_filter.iter()
+            .scan(0, |i, &b|
+                if b {
+                    *i += 1;
+                    Some(sample_filter[*i - 1])
+                } else {
+                    Some(false)
+                }
+            )
+            .collect();
 
-                let gz_writer = gz_writers[k].get_mut(&sample_name).unwrap();
+        let locs: Vec<_> = novaseq_run.locs.iter().zip(filter.iter()).filter_map(
+            |(loc, &b)| if b { Some(loc) } else { None }
+        ).collect();
+
+        let tid: Vec<_> = tile_id.iter()
+            .flat_map(|(tile, n_pf)| std::iter::repeat(tile).take(*n_pf) )
+            .zip(sample_filter)
+            .filter_map(|(&tile, b)| if b { Some(tile) } else { None } )
+            .collect();
+
+        let n_pf = tid.len();
+
+        for (k, (read_h, gz_writer_map)) in read_headers.iter()
+            .zip(gz_writers.iter_mut())
+            .enumerate() {
+
+            let rq_array = extract_read_block(read_h, &filter, &pf_filter, i, n_pf);
+
+            for (((rq_row, tile), loc), (sample_name, index_str)) in rq_array.axis_iter(Axis(1))
+                .zip(tid.iter().cloned())
+                .zip(locs.iter().cloned())
+                .zip(samples.iter().cloned()) {
+
+                let gz_writer = gz_writer_map.get_mut(&sample_name).unwrap();
 
                 writeln!(
                     gz_writer,
@@ -105,12 +138,12 @@ fn extract_sample_chunk(
                     index_str,
                 ).unwrap();
 
-                gz_writer.write_all(&rq_row.slice(ndarray::s![rs..re, 0]).to_vec()).unwrap();
+                gz_writer.write_all(&rq_row.slice(ndarray::s![.., 0]).to_vec()).unwrap();
                 gz_writer.write_all(b"\n+\n").unwrap();
-                gz_writer.write_all(&rq_row.slice(ndarray::s![rs..re, 1]).to_vec()).unwrap();
+                gz_writer.write_all(&rq_row.slice(ndarray::s![.., 1]).to_vec()).unwrap();
                 gz_writer.write_all(b"\n").unwrap();
             }
-        }    
+        }
     }
 }
 
@@ -128,7 +161,7 @@ pub fn write_fastqs(
 
     for lane in lane_iter {
         for surface in 1..=novaseq_run.run_info.flowcell_layout.surface_count {
-            if !novaseq_run.headers.contains_key(&(lane, surface)) {
+            if !novaseq_run.read_headers.contains_key(&[lane, surface]) {
                 continue
             }
 

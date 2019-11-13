@@ -6,46 +6,29 @@ use std::{
     path::PathBuf,
 };
 
-use ndarray::Axis;
 use counter::Counter;
 use rayon::prelude::*;
 
 use crate::cbcl_header_decoder::CBCLHeader;
 use crate::novaseq_run::NovaSeqRun;
-use crate::extract_reads::extract_reads;
+use crate::extract_reads::extract_indices;
 
 
 fn count_tile_chunk(
     i: usize,
-    headers: &[CBCLHeader],
+    headers: &[Vec<CBCLHeader>],
     filter: &[bool],
     pf_filter: &[bool],
-    index_ix: &[(usize, usize)],
     n_counts: usize
-) -> Counter<String> {
-    let reads_and_qscores = extract_reads(&headers, filter, pf_filter, i); 
+) -> Counter<Vec<u8>> {
 
-    let this_count: Counter<String> = reads_and_qscores.axis_iter(Axis(1))
-        .map( |rq_row| {
-            index_ix.iter()
-                .cloned()
-                .map( |(is, ie)| rq_row.slice(ndarray::s![is..ie, 0]).to_vec() )
-                .map( |v| 
-                    unsafe { String::from_utf8_unchecked(v) }
-                ).collect::<Vec<String>>()
-                .join("+")
-        }
-    ).collect();
-
-    let this_count: Counter<String> = this_count.most_common()
+    let this_count: Counter<Vec<u8>> = extract_indices(i, headers, filter, pf_filter)
         .iter()
-        .take(n_counts)
-        .cloned()
+        .map(|v| v.join(&b'+'))
         .collect();
 
-    this_count
+    this_count.most_common().iter().take(n_counts).cloned().collect()
 }
-
 
 
 /// Iterate through all lanes and surfaces and count indexes
@@ -58,21 +41,22 @@ pub fn index_count(
     };
 
     let top_8n_counts = top_n_counts * 8;
-    let mut counts: Counter<String> = Counter::new();
+    let mut counts: Counter<Vec<u8>> = Counter::new();
 
     for lane in 1..=novaseq_run.run_info.flowcell_layout.lane_count {
         for surface in 1..=novaseq_run.run_info.flowcell_layout.surface_count {
             println!("indexing lane {} surface {}", lane, surface);
-            let headers = novaseq_run.headers.get(&(lane, surface)).unwrap();
-            let filters = novaseq_run.filters.get(&(lane, surface)).unwrap();
-            let pf_filters = novaseq_run.pf_filters.get(&(lane, surface)).unwrap();
 
-            let this_count: Counter<String> = filters.par_iter()
+            let filters = novaseq_run.filters.get(&[lane, surface]).unwrap();
+            let pf_filters = novaseq_run.pf_filters.get(&[lane, surface]).unwrap();
+            let idx_headers = novaseq_run.index_headers.get(&[lane, surface]).unwrap();
+
+            let this_count: Counter<Vec<u8>> = filters.par_iter()
                 .zip(pf_filters)
                 .enumerate()
-                .map( |(i, (filter, pf_filter))| 
-                    count_tile_chunk(i, headers, filter, pf_filter, &novaseq_run.index_ix, top_8n_counts)
-                ).reduce(
+                .map( |(i, (filter, pf_filter))| {
+                    count_tile_chunk(i, idx_headers, filter, pf_filter, top_8n_counts)
+                }).reduce(
                     Counter::new,
                     |a, b| a + b
                 );
@@ -83,7 +67,12 @@ pub fn index_count(
     }
 
     for (elem, freq) in counts.most_common_ordered().iter().take(top_n_counts) {
-        writeln!(&mut out_file, "{}\t{}", elem, freq).unwrap();
+        writeln!(
+            &mut out_file, 
+            "{}\t{}", 
+            unsafe { String::from_utf8_unchecked(elem.to_vec()) },
+            freq
+        ).unwrap();
     }
 
     Ok(())

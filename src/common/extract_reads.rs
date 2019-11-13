@@ -28,15 +28,26 @@ fn u8_to_base(b: u8, q: u8) -> u8 {
 
 /// unpacks a single byte into four 2-bit integers
 fn unpack_byte(b: &u8, filter: &[bool], header: &CBCLHeader) -> Vec<u8> {
-    let q_1 = header.decode_qscore((b >> 6) & 3u8);
-    let b_1 = u8_to_base((b >> 4) & 3u8, q_1);
-    let q_2 = header.decode_qscore((b >> 2) & 3u8);
-    let b_2 = u8_to_base(b & 3u8, q_2);
-
     match filter {
-        [true, true] => vec![b_2, q_2, b_1, q_1],
-        [true, false] =>  vec![b_2, q_2],
-        [false, true] =>  vec![b_1, q_1],
+        [true, true] => {
+            let q_1 = header.decode_qscore((b >> 6) & 3u8);
+            let b_1 = u8_to_base((b >> 4) & 3u8, q_1);
+            let q_2 = header.decode_qscore((b >> 2) & 3u8);
+            let b_2 = u8_to_base(b & 3u8, q_2);
+        
+            vec![b_2, q_2, b_1, q_1]
+        },
+        [true, false] => {
+            let q_2 = header.decode_qscore((b >> 2) & 3u8);
+            let b_2 = u8_to_base(b & 3u8, q_2);
+        
+            vec![b_2, q_2]
+        },
+        [false, true] => {
+            let q_1 = header.decode_qscore((b >> 6) & 3u8);
+            let b_1 = u8_to_base((b >> 4) & 3u8, q_1);
+            vec![b_1, q_1]
+        },
         _ => vec![],
     }
 }
@@ -89,10 +100,9 @@ fn process_tiles(
 
 
 /// Create arrays of read and qscore values from a set of tiles
-pub fn extract_reads(
-    headers: &[CBCLHeader], filter: &[bool], pf_filter: &[bool], i: usize,
+pub fn extract_read_block(
+    headers: &[CBCLHeader], filter: &[bool], pf_filter: &[bool], i: usize, n_pf: usize,
 ) -> Array3<u8> {
-    let n_pf = pf_filter.iter().map(|&b| if b { 1 } else { 0 }).sum::<usize>();
     let n_cycles = headers.len();
 
     // preallocate a vector for bases/qscores
@@ -111,6 +121,31 @@ pub fn extract_reads(
     }
 
     out_array
+}
+
+
+/// given a vector of index headers, extract the indices as byte vectors, then re-zip
+/// them into the groups of indices corresponding to each read
+pub fn extract_indices(
+    i: usize,
+    headers: &[Vec<CBCLHeader>],
+    filter: &[bool],
+    pf_filter: &[bool]
+) -> Vec<Vec<Vec<u8>>> {
+    let n_pf = pf_filter.iter().map(|&b| if b { 1 } else { 0 }).sum();
+
+    let index_vecs: Vec<_> = headers.iter()
+        .map( |h|
+            extract_read_block(h, filter, pf_filter, i, n_pf).index_axis(Axis(2), 0)
+                .axis_iter(Axis(1))
+                .map( |r_row| r_row.to_vec())
+                .collect::<Vec<_>>()
+        )
+        .collect();
+
+    (0..index_vecs[0].len()).map(
+        |i| index_vecs.iter().map(|v| v[i].clone()).collect::<Vec<_>>()
+    ).collect()
 }
 
 
@@ -166,8 +201,8 @@ mod tests {
             84, 70, 65, 70, 67, 70, 67, 70, 67, 70, 65, 70, 67, 58, 67, 70
         ];
 
-        let header = &novaseq_run.headers.get(&(1, 1)).unwrap()[0];
-        let filter = &novaseq_run.filters.get(&(1, 1)).unwrap()[0];
+        let header = &novaseq_run.read_headers.get(&[1, 1]).unwrap()[0][0];
+        let filter = &novaseq_run.filters.get(&[1, 1]).unwrap()[0];
 
         let n_pf = filter.iter().map(|&b| if b { 1 } else { 0 }).sum();
         let mut byte_vec = Vec::with_capacity(n_pf * 2);
