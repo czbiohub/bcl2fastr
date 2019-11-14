@@ -144,7 +144,7 @@ fn make_sample_maps(
     }
 
     // distribute samples over chunks 
-    let chunk_size = samples.len() / n_threads + 1;
+    let chunk_size = std::cmp::max(samples.len() / n_threads, 1);
 
     let lane_vec: Vec<_> = sample_names.chunks(chunk_size).map(
         |sample_chunk|
