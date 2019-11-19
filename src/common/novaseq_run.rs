@@ -21,6 +21,9 @@ pub struct NovaSeqRun {
     pub run_info: RunInfo,
     /// a string with the run info formatted for read headers
     pub run_id: String,
+    /// pre-compute this size once: the maximum number of bytes in any block,
+    /// used to preallocate a vector while reading the data
+    pub max_vec_size: usize,
     /// a single universal locs array, same for every tile
     pub locs: Locs,
     /// a map from [lane, surface] tuples to vectors of filters
@@ -62,6 +65,8 @@ impl NovaSeqRun {
         let mut pf_filters = HashMap::new();
         let mut tile_ids = HashMap::new();
 
+        let mut max_vec_size: Vec<usize> = Vec::new();
+
         for lane in 1..=run_info.flowcell_layout.lane_count {
             for surface in 1..=run_info.flowcell_layout.surface_count {
                 println!("lane {} - surface {}", lane, surface);
@@ -90,6 +95,13 @@ impl NovaSeqRun {
                             cbcl_header_decoder(&cbcl_path, tile_chunk).unwrap()
                         }
                     ).collect();
+
+                    max_vec_size.push(
+                        these_headers.iter()
+                            .flat_map(|h| h.uncompressed_size.iter().cloned())
+                            .max()
+                            .unwrap()
+                    );
 
                     if read.is_indexed_read {
                         lane_surface_index_headers.push(these_headers);
@@ -162,10 +174,13 @@ impl NovaSeqRun {
             }
         }
 
+        let max_vec_size = max_vec_size.iter().cloned().max().unwrap();
+
         let novaseq_run = NovaSeqRun {
             run_path,
             run_info,
             run_id,
+            max_vec_size,
             locs,
             filters,
             pf_filters,

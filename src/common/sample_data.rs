@@ -5,6 +5,8 @@
 use std::path::PathBuf;
 use std::collections::HashMap;
 
+use ndarray::ArrayView1;
+
 use crate::hamming_set::{check_conflict, hamming_set, singleton_set};
 
 
@@ -26,30 +28,30 @@ pub struct Samples {
 
 impl Samples {
     /// Look up a sample given a vector of indices (themselves vectors)
-    pub fn get_sample(&self, indices: &[Vec<u8>]) -> Option<(String, String)> {
+    pub fn get_sample(&self, indices: &[ArrayView1<u8>]) -> Option<(String, String)> {
         match indices.len() {
-            1 => self.get_1index_sample(&indices[0]),
-            2 => self.get_2index_sample(&indices[0], &indices[1]),
+            1 => self.get_1index_sample(indices[0]),
+            2 => self.get_2index_sample(indices[0], indices[1]),
             x => panic!("Got {} indices?!", x)
         }
     }
 
     /// helper function for when there is one index
-    fn get_1index_sample(&self, i: &[u8]) -> Option<(String, String)> {
-        match self.index.get(i) {
+    fn get_1index_sample(&self, i: ArrayView1<u8>) -> Option<(String, String)> {
+        match self.index.get(i.as_slice().unwrap()) {
             Some(sample_t) => return Some(sample_t.clone()),
             None => return None
         };
     }
 
     /// helper function for when there are two indices
-    fn get_2index_sample(&self, i: &[u8], i2: &[u8]) -> Option<(String, String)> {
-        let (index1_sample, og_index) = match self.index.get(i) {
+    fn get_2index_sample(&self, i: ArrayView1<u8>, i2: ArrayView1<u8>) -> Option<(String, String)> {
+        let (index1_sample, og_index) = match self.index.get(i.as_slice().unwrap()) {
             Some(sample_t) => sample_t,
             None => return None
         };
 
-        let (index2_sample, og_index2) = match self.index2.get(i2) {
+        let (index2_sample, og_index2) = match self.index2.get(i2.as_slice().unwrap()) {
             Some(sample_t) => sample_t,
             None => return None
         };
@@ -246,6 +248,8 @@ pub fn read_samplesheet(
 mod tests {
     use super::*;
     use std::fs;
+
+    use ndarray::array;
 
     static ROOT: &str = "test_data/sample_data";
 
@@ -449,49 +453,33 @@ mod tests {
         let sampledata = read_samplesheet(samplesheet, 1, 1).unwrap();
         let lane = &sampledata.get(&0).unwrap()[0];
 
+        let idx1 = array![71, 84, 71, 71, 71];
+        let idx2 = array![65, 65, 65, 65, 65];
+        let idx3 = array![67, 67, 67, 67, 71];
+
         // good lookup, one index
         assert_eq!(
-            lane.get_sample(&[vec![71, 84, 71, 71, 71]]).unwrap(), 
+            lane.get_sample(&[idx1.view()]).unwrap(), 
             ("sample_1".to_string(), "GGGGG".to_string())
         );
 
         // good lookup, two indices
         assert_eq!(
-            lane.get_sample(
-                &[vec![71, 84, 71, 71, 71], vec![65, 65, 65, 65, 65]]
-            ).unwrap(), 
+            lane.get_sample(&[idx1.view(), idx2.view()]).unwrap(), 
             ("sample_1".to_string(), "GGGGG+AAAAA".to_string())
         );
 
         // bad single index
-        assert_eq!(
-            lane.get_sample(&[vec![65, 65, 65, 65, 65]]),
-            None
-        );
+        assert_eq!(lane.get_sample(&[idx2.view()]), None);
 
         // bad index, two indices
-        assert_eq!(
-            lane.get_sample(
-                &[vec![65, 65, 65, 65, 65], vec![71, 84, 71, 71, 71]]
-            ),
-            None
-        );
+        assert_eq!(lane.get_sample(&[idx2.view(), idx1.view()]), None);
 
         // bad index2
-        assert_eq!(
-            lane.get_sample(
-                &[vec![71, 84, 71, 71, 71], vec![71, 84, 71, 71, 71]]
-            ),
-            None
-        );
+        assert_eq!(lane.get_sample(&[idx1.view(), idx1.view()]), None);
 
         // indexes match different samples
-        assert_eq!(
-            lane.get_sample(
-                &[vec![71, 84, 71, 71, 71], vec![67, 67, 67, 67, 71]]
-            ),
-            None
-        );        
+        assert_eq!(lane.get_sample(&[idx1.view(), idx3.view()]), None);
     }
 
     #[test]
@@ -619,6 +607,8 @@ mod tests {
         let sampledata = read_samplesheet(samplesheet, 1, 1).unwrap();
         let lane = &sampledata.get(&0).unwrap()[0];
 
-        lane.get_sample(&[vec![71, 84], vec![65, 65], vec![65, 65]]).unwrap();
+        lane.get_sample(
+            &[array![71, 84].view(), array![65, 65].view(), array![65, 65].view()]
+        ).unwrap();
     }
 }

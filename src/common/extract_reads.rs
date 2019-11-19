@@ -7,7 +7,7 @@ use std::{
 };
 
 use flate2::read::MultiGzDecoder;
-use ndarray::{Array3, ArrayView, ArrayViewMut2, Axis};
+use ndarray::{Array3, ArrayViewMut2, Axis, ShapeBuilder};
 
 use crate::cbcl_header_decoder::CBCLHeader;
 
@@ -54,98 +54,88 @@ fn unpack_byte(b: &u8, filter: &[bool], header: &CBCLHeader) -> Vec<u8> {
 
 
 /// extract multiple tiles from a CBCL file and return decompressed bytes
-fn extract_tiles(header: &CBCLHeader, i: usize) -> std::io::Result<Vec<u8>> {
+fn extract_tiles(
+    header: &CBCLHeader, i: usize, read_buffer: &mut Vec<u8>
+) -> std::io::Result<()> {
     let start_pos = header.start_pos[i];
     let uncompressed_size = header.uncompressed_size[i];
-    let compressed_size = header.compressed_size[i];
 
     // open file and seek to start position
     let mut cbcl = File::open(&header.cbcl_path)?;
     cbcl.seek(SeekFrom::Start(start_pos))?;
 
-    // read the compressed data for specified tile(s)
-    let mut read_buffer = vec![0u8; compressed_size];
-    cbcl.read_exact(&mut read_buffer)?;
+    // use MultiGzDecoder to decompress
+    let mut gz = MultiGzDecoder::new(&cbcl);
+    gz.read_exact(&mut read_buffer[..uncompressed_size])?;
 
-    // use MultiGzDecoder to uncompress the number of bytes summed 
-    // over the offsets of all tile_idces
-    let mut uncomp_bytes = vec![0u8; uncompressed_size];
-    let mut gz = MultiGzDecoder::new(&read_buffer[..]);
-    gz.read_exact(&mut uncomp_bytes)?;
-
-    Ok(uncomp_bytes)
+    Ok(())
 }
 
 
 /// given a CBCL file and some tiles: extract, translate and filter the bases+scores
 fn process_tiles(
-    byte_vec: &mut Vec<u8>,
-    bq_array: &mut ArrayViewMut2<u8>,
+    read_buffer: &mut Vec<u8>,
+    bq_cycle: &mut ArrayViewMut2<u8>,
     header: &CBCLHeader,
     filter: &[bool],
     i: usize,
 ) -> () {
-    if let Ok(uncomp_bytes) = extract_tiles(header, i) {
+    if let Ok(_) = extract_tiles(header, i, read_buffer) {
         // unpack the bytes, filtering out the reads that didn't pass
-        byte_vec.extend(
-            uncomp_bytes.iter()
+        bq_cycle.iter_mut().zip(
+            read_buffer.iter()
                 .zip(filter.chunks(2))
                 .flat_map(|(v, f)| unpack_byte(v, f, header))
-        );
-
-        bq_array.assign(&ArrayView::from_shape(bq_array.raw_dim(), byte_vec).unwrap());
-        byte_vec.clear();
+        ).for_each(|(a, b)| { *a = b; });
+    } else {
+        bq_cycle.index_axis_mut(Axis(1), 0).fill(b'N');
+        bq_cycle.index_axis_mut(Axis(1), 1).fill(b'#');
     }
 }
 
 
 /// Create arrays of read and qscore values from a set of tiles
 pub fn extract_read_block(
-    headers: &[CBCLHeader], filter: &[bool], pf_filter: &[bool], i: usize, n_pf: usize,
-) -> Array3<u8> {
+    headers: &[CBCLHeader],
+    filter: &[bool],
+    pf_filter: &[bool],
+    rq_array: &mut Array3<u8>,
+    read_buffer: &mut Vec<u8>,
+    i: usize,
+    n_pf: usize,
+) -> () {
     let n_cycles = headers.len();
+    let mut bq_array = rq_array.slice_mut(ndarray::s![..n_cycles, ..n_pf, ..]);
 
-    // preallocate a vector for bases/qscores
-    let mut byte_vec = Vec::with_capacity(n_pf * 2);
-
-    // preallocate an array for total output, with default values
-    let mut out_array = Array3::zeros((n_cycles, n_pf, 2));
-
-    out_array.index_axis_mut(Axis(2), 0).fill(b'N');
-    out_array.index_axis_mut(Axis(2), 1).fill(b'#');
-
-    for (mut row, h) in out_array.axis_iter_mut(Axis(0)).zip(headers) {
+    for (mut cycle, h) in bq_array.axis_iter_mut(Axis(0)).zip(headers) {
         let h_filter = if h.non_pf_clusters_excluded { pf_filter } else { filter };
 
-        process_tiles(&mut byte_vec, &mut row, h, h_filter, i);
+        process_tiles(read_buffer, &mut cycle, h, h_filter, i);
     }
-
-    out_array
 }
 
 
 /// given a vector of index headers, extract the indices as byte vectors, then re-zip
 /// them into the groups of indices corresponding to each read
-pub fn extract_indices(
-    i: usize,
+pub fn extract_indices<'a>(
     headers: &[Vec<CBCLHeader>],
     filter: &[bool],
-    pf_filter: &[bool]
-) -> Vec<Vec<Vec<u8>>> {
-    let n_pf = pf_filter.iter().map(|&b| if b { 1 } else { 0 }).sum();
+    pf_filter: &[bool],
+    read_buffer: &mut Vec<u8>,
+    i: usize,
+    n_pf: usize,
+) -> Vec<Array3<u8>> {
+    let mut index_arrays: Vec<_> = headers.iter().map( |h| 
+        Array3::zeros((h.len(), n_pf, 2).f())
+    ).collect();
 
-    let index_vecs: Vec<_> = headers.iter()
-        .map( |h|
-            extract_read_block(h, filter, pf_filter, i, n_pf).index_axis(Axis(2), 0)
-                .axis_iter(Axis(1))
-                .map( |r_row| r_row.to_vec())
-                .collect::<Vec<_>>()
-        )
-        .collect();
+    headers.iter()
+        .zip(index_arrays.iter_mut())
+        .for_each( |(h, mut out_arr)|
+            extract_read_block(h, filter, pf_filter, &mut out_arr, read_buffer, i, n_pf)
+        );
 
-    (0..index_vecs[0].len()).map(
-        |i| index_vecs.iter().map(|v| v[i].clone()).collect::<Vec<_>>()
-    ).collect()
+    index_arrays
 }
 
 
@@ -187,9 +177,11 @@ mod tests {
             206, 237, 223, 220, 205, 76, 220, 205, 232, 220
         ];
 
-        let uncomp_bytes = super::extract_tiles(&cbcl_header, 0).unwrap();
+        let mut read_buffer = vec![0u8; cbcl_header.uncompressed_size[0]];
 
-        assert_eq!(uncomp_bytes, expected_bytes)
+        super::extract_tiles(&cbcl_header, 0, &mut read_buffer).unwrap();
+
+        assert_eq!(read_buffer, expected_bytes)
     }
 
     #[test]
@@ -205,11 +197,11 @@ mod tests {
         let filter = &novaseq_run.filters.get(&[1, 1]).unwrap()[0];
 
         let n_pf = filter.iter().map(|&b| if b { 1 } else { 0 }).sum();
-        let mut byte_vec = Vec::with_capacity(n_pf * 2);
         let mut bq_array = Array2::zeros((n_pf, 2));
+        let mut read_buffer = vec![0u8; novaseq_run.max_vec_size];
 
         super::process_tiles(
-            &mut byte_vec, &mut bq_array.view_mut(), header, filter, 0
+            &mut read_buffer, &mut bq_array.view_mut(), header, filter, 0
         );
 
         let bq_pairs: Vec<_> = bq_array.iter().cloned().take(16).collect();

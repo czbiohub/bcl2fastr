@@ -16,16 +16,24 @@ use crate::extract_reads::extract_indices;
 
 fn count_tile_chunk(
     i: usize,
+    max_vec_size: usize,
     headers: &[Vec<CBCLHeader>],
     filter: &[bool],
     pf_filter: &[bool],
     n_counts: usize
 ) -> Counter<Vec<u8>> {
+    let n_pf = pf_filter.iter().map(|&b| if b { 1 } else { 0 }).sum();
+    let mut read_buffer = vec![0u8; max_vec_size];
 
-    let this_count: Counter<Vec<u8>> = extract_indices(i, headers, filter, pf_filter)
-        .iter()
-        .map(|v| v.join(&b'+'))
-        .collect();
+    let index_arrays = extract_indices(
+        headers, filter, pf_filter, &mut read_buffer, i, n_pf
+    );
+
+    let this_count: Counter<Vec<u8>> = (0..n_pf).map( |i| 
+        index_arrays.iter().map(
+            |arr| arr.slice(ndarray::s![.., i, 0]).to_vec()
+        ).collect::<Vec<_>>().join(&b'+')
+    ).collect();
 
     this_count.most_common().iter().take(n_counts).cloned().collect()
 }
@@ -55,7 +63,14 @@ pub fn index_count(
                 .zip(pf_filters)
                 .enumerate()
                 .map( |(i, (filter, pf_filter))| {
-                    count_tile_chunk(i, idx_headers, filter, pf_filter, top_8n_counts)
+                    count_tile_chunk(
+                        i,
+                        novaseq_run.max_vec_size,
+                        idx_headers,
+                        filter,
+                        pf_filter,
+                        top_8n_counts,
+                    )
                 }).reduce(
                     Counter::new,
                     |a, b| a + b

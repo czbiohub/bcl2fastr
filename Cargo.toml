@@ -38,3 +38,6 @@ predicates = "1.0"
 
 [build-dependencies]
 cc = "1.0"
+
+[profile.release]
+debug = true

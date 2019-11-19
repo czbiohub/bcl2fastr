@@ -8,7 +8,7 @@ use std::{
 };
 
 use flate2::write::GzEncoder;
-use ndarray::Axis;
+use ndarray::{Array3, Axis, ShapeBuilder};
 use rayon::prelude::*;
 
 use crate::novaseq_run::NovaSeqRun;
@@ -42,6 +42,17 @@ fn extract_sample_chunk(
     let pf_filters = novaseq_run.pf_filters.get(&[lane, surface]).unwrap();
     let tile_ids = novaseq_run.tile_ids.get(&[lane, surface]).unwrap();
 
+    // compute max size needed for data in a tile
+    let max_cycles = read_headers.iter().map(|h| h.len()).max().unwrap();
+    let max_n_pf = tile_ids.iter().map(
+        |tid| tid.iter().map(|(_, n_pf)| n_pf).sum::<usize>()
+    ).max().unwrap();
+
+    // pre-allocating arrays and vectors to re-use during reading
+    let mut read_buffer = vec![0; novaseq_run.max_vec_size];
+    let mut rq_array = Array3::zeros((max_cycles, max_n_pf, 2).f());
+
+    // create gz writers for the samples in this chunk
     let mut gz_writers: Vec<_> = (1..=read_headers.len())
         .map( |i|
             sample_chunk.sample_names.iter().map( |sample_name| {
@@ -56,18 +67,36 @@ fn extract_sample_chunk(
             }).collect::<HashMap<_, _>>()
         ).collect();
 
+    // iterate over tiles
     for (i, ((filter, pf_filter), tile_id)) in filters.iter()
         .zip(pf_filters)
         .zip(tile_ids)
         .enumerate() {
 
-        // first read the indices alone, and use them to filter the reads
-        let indices = extract_indices(i, idx_headers, filter, pf_filter);
+        println!("processing filter chunk {}", i);
 
-        let sample_filter: Vec<_> = indices.iter()
+        let n_pf = pf_filter.iter().map(|&b| if b { 1 } else { 0 }).sum();
+
+        // first read the indices alone, and use them to filter the reads
+        let index_arrays = extract_indices(
+            idx_headers, filter, pf_filter, &mut read_buffer, i, n_pf
+        );
+
+        // find which indices correspond to samples in this chunk
+        let sample_options: Vec<_> = (0..n_pf).map( |j| 
+                sample_chunk.get_sample(
+                    &index_arrays.iter()
+                        .map(|arr| arr.slice(ndarray::s![.., j, 0]))
+                        .collect::<Vec<_>>()[..]
+                )
+            )
+            .collect();
+
+        // boolean filter for this set of samples
+        let sample_filter: Vec<_> = sample_options.iter()
             .map(
-                |ix|
-                if let Some(_) = sample_chunk.get_sample(&ix) {
+                |sample_option|
+                if let Some(_) = sample_option {
                     true
                 } else {
                     false
@@ -75,8 +104,14 @@ fn extract_sample_chunk(
             )
             .collect();
 
-        let samples: Vec<_> = indices.iter()
-            .filter_map( |ix| sample_chunk.get_sample(&ix) )
+        let samples: Vec<_> = sample_options.iter()
+            .filter_map( |sample_option|
+                 if let Some(sample) = sample_option {
+                     Some(sample.clone())
+                 } else {
+                     None
+                 }
+            )
             .collect();
 
         let filter: Vec<_> = filter.iter()
@@ -117,8 +152,17 @@ fn extract_sample_chunk(
             .zip(gz_writers.iter_mut())
             .enumerate() {
 
-            let rq_array = extract_read_block(read_h, &filter, &pf_filter, i, n_pf);
+            extract_read_block(
+                read_h,
+                &filter,
+                &pf_filter,
+                &mut rq_array,
+                &mut read_buffer,
+                i,
+                n_pf
+            );
 
+            // zip will stop when all samples are used, so don't need to slice rq_array
             for (((rq_row, tile), loc), (sample_name, index_str)) in rq_array.axis_iter(Axis(1))
                 .zip(tid.iter().cloned())
                 .zip(locs.iter().cloned())
@@ -138,9 +182,9 @@ fn extract_sample_chunk(
                     index_str,
                 ).unwrap();
 
-                gz_writer.write_all(&rq_row.slice(ndarray::s![.., 0]).to_vec()).unwrap();
+                gz_writer.write_all(rq_row.slice(ndarray::s![.., 0]).as_slice().unwrap()).unwrap();
                 gz_writer.write_all(b"\n+\n").unwrap();
-                gz_writer.write_all(&rq_row.slice(ndarray::s![.., 1]).to_vec()).unwrap();
+                gz_writer.write_all(rq_row.slice(ndarray::s![.., 1]).as_slice().unwrap()).unwrap();
                 gz_writer.write_all(b"\n").unwrap();
             }
         }
