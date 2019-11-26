@@ -2,68 +2,71 @@
 //! that have index to sample mappings with all indices included within distance 1
 //! of original index or distance 0 if overlapping indices are present within distance 1
 
-use std::path::PathBuf;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use ndarray::ArrayView1;
 
 use crate::hamming_set::{check_conflict, hamming_set, singleton_set};
 
-
 /// SampleData maps from lane number to the index maps for the lane. The maps are
 /// chunked into different pieces, each corresponding to a set of samples that will be
 /// processed together
-pub type SampleData = HashMap<usize, Vec<Samples>>;
+pub type SampleData = HashMap<usize, Samples>;
 
-
-/// Lane has one or two maps from index to a tuple of (sample name, corrected index)
-/// If there is only one index, index2 will be empty and shouldn't be used
+/// The Samples struct has one or two maps that go from potential indices to sample
+/// and corrected index strings. To save space and for speed, we save the original
+/// data as a vector and use integers to index into them.
+///
+/// If there is only one index, index2 will contain a single empty string. If there are
+/// two indices index2 will contain the original index with a '+' prepended. This makes
+/// it very easy to print out the correct header later.
 #[derive(Debug, PartialEq)]
 pub struct Samples {
     pub sample_names: Vec<String>,
-    index: HashMap<Vec<u8>, (String, String)>,
-    index2: HashMap<Vec<u8>, (String, String)>
+    pub index: Vec<String>,
+    pub index2: Vec<String>,
+    index_map: HashMap<Vec<u8>, [usize; 2]>,
+    index2_map: HashMap<Vec<u8>, [usize; 2]>,
 }
 
-
 impl Samples {
-    /// Look up a sample given a vector of indices (themselves vectors)
-    pub fn get_sample(&self, indices: &[ArrayView1<u8>]) -> Option<(String, String)> {
+    /// Look up a sample given a vector of indices
+    pub fn get_sample(&self, indices: &[ArrayView1<u8>]) -> Option<[usize; 3]> {
         match indices.len() {
             1 => self.get_1index_sample(indices[0]),
             2 => self.get_2index_sample(indices[0], indices[1]),
-            x => panic!("Got {} indices?!", x)
+            x => panic!("Got {} indices?!", x),
         }
     }
 
     /// helper function for when there is one index
-    fn get_1index_sample(&self, i: ArrayView1<u8>) -> Option<(String, String)> {
-        match self.index.get(i.as_slice().unwrap()) {
-            Some(sample_t) => return Some(sample_t.clone()),
-            None => return None
+    fn get_1index_sample(&self, i: ArrayView1<u8>) -> Option<[usize; 3]> {
+        match self.index_map.get(i.as_slice().unwrap()) {
+            Some([index_sample, og_i]) => return Some([index_sample.clone(), og_i.clone(), 0]),
+            None => return None,
         };
     }
 
     /// helper function for when there are two indices
-    fn get_2index_sample(&self, i: ArrayView1<u8>, i2: ArrayView1<u8>) -> Option<(String, String)> {
-        let (index1_sample, og_index) = match self.index.get(i.as_slice().unwrap()) {
+    fn get_2index_sample(&self, i: ArrayView1<u8>, i2: ArrayView1<u8>) -> Option<[usize; 3]> {
+        let [ix1_sample, og_i] = match self.index_map.get(i.as_slice().unwrap()) {
             Some(sample_t) => sample_t,
-            None => return None
+            None => return None,
         };
 
-        let (index2_sample, og_index2) = match self.index2.get(i2.as_slice().unwrap()) {
+        let [ix2_sample, og_i2] = match self.index2_map.get(i2.as_slice().unwrap()) {
             Some(sample_t) => sample_t,
-            None => return None
+            None => return None,
         };
 
-        if index1_sample == index2_sample {
-            return Some((index1_sample.clone(), format!("{}+{}", og_index, og_index2)))
+        if ix1_sample == ix2_sample {
+            return Some([ix1_sample.clone(), og_i.clone(), og_i2.clone()]);
         } else {
-            return None
+            return None;
         }
     }
 }
-
 
 /// Function to go from a lane worth of sample and index vectors to a Lane struct
 /// which will include the necessary error-correction, up to some limit `max_distance`
@@ -72,16 +75,31 @@ fn make_sample_maps(
     index_vec: &[Vec<u8>],
     index2_vec: &[Vec<u8>],
     max_distance: usize,
-    n_threads: usize
-) -> Vec<Samples> {
+) -> Samples {
     // index_vec should be full
-    assert_eq!(sample_names.len(), index_vec.len(), "Missing indexes for some samples");
+    assert_eq!(
+        sample_names.len(),
+        index_vec.len(),
+        "Missing indexes for some samples"
+    );
 
     // index2_vec should either be full or empty, nothing in between
     assert!(
         index2_vec.len() == index_vec.len() || index2_vec.len() == 0,
         "Samplesheet is missing index2 for some samples"
     );
+
+    let index_lookup: HashMap<_, _> = index_vec
+        .iter()
+        .enumerate()
+        .map(|(i, ix)| (ix, i))
+        .collect();
+
+    let index2_lookup: HashMap<_, _> = index2_vec
+        .iter()
+        .enumerate()
+        .map(|(i, ix)| (ix, i))
+        .collect();
 
     // start at distance 0: just map samples to indices
     let mut index_hash_sets: Vec<_> = index_vec.iter().map(singleton_set).collect();
@@ -92,99 +110,100 @@ fn make_sample_maps(
     }
 
     for _ in 1..=max_distance {
-        let new_index_hash_sets: Vec<_> = index_hash_sets.iter()
-            .map(hamming_set)
-            .collect();
+        let new_index_hash_sets: Vec<_> = index_hash_sets.iter().map(hamming_set).collect();
 
-        let new_index2_hash_sets: Vec<_> = index2_hash_sets.iter()
-            .map(hamming_set)
-            .collect();
+        let new_index2_hash_sets: Vec<_> = index2_hash_sets.iter().map(hamming_set).collect();
 
         if check_conflict(&sample_names, &new_index_hash_sets, &new_index2_hash_sets) {
-            break
+            break;
         }
 
         index_hash_sets = new_index_hash_sets;
         index2_hash_sets = new_index2_hash_sets;
     }
 
-    // converted to this from utf-8 originally, so we know this is safe
-    let index_vec: Vec<_> = index_vec.iter()
-        .cloned()
-        .map( |index| unsafe { String::from_utf8_unchecked(index) })
-        .collect();
-
-    // this is empty if there is no second index
-    let index2_vec: Vec<_> = index2_vec.iter()
-        .cloned()
-        .map( |index| unsafe { String::from_utf8_unchecked(index) })
-        .collect();
-
     // now that we have the final index set, we need to chunk the samples,
     // making sure to put all samples with the same name in the same chunk
     let mut samples = HashMap::new();
     let mut samples2 = HashMap::new();
 
-    for ((sample_name, og_index), hash_set) in sample_names.iter()
+    for ((sample_i, og_index), hash_set) in (0..sample_names.len())
         .zip(index_vec.iter())
-        .zip(index_hash_sets) {
-
-        let index_map = samples.entry(sample_name).or_insert(Vec::new());
+        .zip(index_hash_sets)
+    {
+        let index_map = samples.entry(sample_i).or_insert(Vec::new());
         for index in hash_set.iter().cloned() {
-            index_map.push((index, (sample_name.clone(), og_index.clone())));
+            index_map.push((
+                index,
+                [sample_i, index_lookup.get(&og_index).unwrap().clone()],
+            ));
         }
     }
 
-    for ((sample_name, og_index2), hash_set) in sample_names.iter()
+    for ((sample_i, og_index2), hash_set) in (0..sample_names.len())
         .zip(index2_vec.iter())
-        .zip(index2_hash_sets) {
-
-        let index2_map = samples2.entry(sample_name).or_insert(Vec::new());
+        .zip(index2_hash_sets)
+    {
+        let index2_map = samples2.entry(sample_i).or_insert(Vec::new());
         for index2 in hash_set.iter().cloned() {
-            index2_map.push((index2, (sample_name.clone(), og_index2.clone())));
+            index2_map.push((
+                index2,
+                [sample_i, index2_lookup.get(&og_index2).unwrap().clone()],
+            ));
         }
     }
 
-    // distribute samples over chunks 
-    let chunk_size = std::cmp::max(samples.len() / n_threads, 1);
+    // converted to this from utf-8 originally, so we know this is safe
+    let index_vec: Vec<_> = index_vec
+        .iter()
+        .cloned()
+        .map(|index| unsafe { String::from_utf8_unchecked(index) })
+        .collect();
 
-    let lane_vec: Vec<_> = sample_names.chunks(chunk_size).map(
-        |sample_chunk|
-        {
-            let index_map: HashMap<_, _> = sample_chunk.iter().filter_map(
-                |sample_name| samples.get(sample_name)
-            ).flatten().cloned().collect();
+    // this is empty if there is no second index
+    let index2_vec: Vec<_> = index2_vec
+        .iter()
+        .cloned()
+        .map(|index| unsafe { String::from_utf8_unchecked(index) })
+        .collect();
 
-            let index2_map: HashMap<_, _> = sample_chunk.iter().filter_map(
-                |sample_name| samples2.get(sample_name)
-            ).flatten().cloned().collect();
+    let index_map: HashMap<_, _> = (0..sample_names.len())
+        .filter_map(|sample_i| samples.get(&sample_i))
+        .flatten()
+        .cloned()
+        .collect();
 
-            Samples { 
-                sample_names: sample_chunk.to_vec(), 
-                index: index_map, 
-                index2: index2_map 
-            }
-        }
-    ).collect();
+    let index2_map: HashMap<_, _> = (0..sample_names.len())
+        .filter_map(|sample_i| samples2.get(&sample_i))
+        .flatten()
+        .cloned()
+        .collect();
 
-    lane_vec
+    Samples {
+        sample_names: sample_names.to_vec(),
+        index: index_vec,
+        index2: match index2_vec.len() {
+            0 => vec!["".to_string()],
+            _ => index2_vec.iter().map(|ix2| ["+", ix2].join("")).collect(),
+        },
+        index_map,
+        index2_map,
+    }
 }
-
 
 /// loads a sample sheet and converts it into a SampleData struct. Our version
 /// automatically determines the mismatch rate that prevents conflicts, up to
 /// a specified maximum
-pub fn read_samplesheet(
-    samplesheet: PathBuf, max_distance: usize, n_threads: usize
-) -> std::io::Result<SampleData> {
+pub fn read_samplesheet(samplesheet: PathBuf, max_distance: usize) -> std::io::Result<SampleData> {
     let mut rdr = csv::ReaderBuilder::new()
         .flexible(true)
         .has_headers(false)
         .from_path(samplesheet)?;
 
     // ignore any rows before the Data section
-    let rows: Vec<_> = rdr.records()
-        .filter_map(|r| match r { 
+    let rows: Vec<_> = rdr
+        .records()
+        .filter_map(|r| match r {
             Ok(r) => Some(r),
             Err(e) => panic!("{}", e),
         })
@@ -208,41 +227,42 @@ pub fn read_samplesheet(
     // collect samples per-lane (or in one big lane if there is no lane column)
     let mut lanes = HashMap::new();
 
-    for record in rows[2..].iter()
-        .map( |r| 
-            rows[1].iter()
-                .zip(r.iter())
-                .collect::<HashMap<_, _>>()
-        ) {
+    for record in rows[2..]
+        .iter()
+        .map(|r| rows[1].iter().zip(r.iter()).collect::<HashMap<_, _>>())
+    {
         let lane: usize = match record.get(&"Lane") {
             Some(lane) => lane.parse().unwrap(),
             None => 0,
         };
 
-        let (sample_name, sample_idx, sample_idx2) = lanes.entry(lane).or_insert_with(
-            || (Vec::new(), Vec::new(), Vec::new())
-        );
+        let (sample_name, sample_idx, sample_idx2) = lanes
+            .entry(lane)
+            .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new()));
 
         sample_name.push(record.get(&"Sample_Name").unwrap().to_string());
         match record.get(&"Index") {
             Some(&idx) if idx.len() > 0 => sample_idx.push(idx.as_bytes().to_vec()),
-            Some(_) | None => ()
+            Some(_) | None => (),
         }
         match record.get(&"Index2") {
             Some(&idx2) if idx2.len() > 0 => sample_idx2.push(idx2.as_bytes().to_vec()),
-            Some(_) | None => ()
+            Some(_) | None => (),
         };
     }
 
-    let sample_data: HashMap<_, _> = lanes.iter()
-        .map( |(&i, (smp_names, idx_vec, idx2_vec))|
-            (i, make_sample_maps(smp_names, idx_vec, idx2_vec, max_distance, n_threads))
-        )
+    let sample_data: HashMap<_, _> = lanes
+        .iter()
+        .map(|(&i, (smp_names, idx_vec, idx2_vec))| {
+            (
+                i,
+                make_sample_maps(smp_names, idx_vec, idx2_vec, max_distance),
+            )
+        })
         .collect();
- 
+
     Ok(sample_data)
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -256,50 +276,42 @@ mod tests {
     #[test]
     fn with_conflict_no_index2_w_lanes() {
         let samplesheet = PathBuf::from(ROOT).join("w_conflict_no_index2_w_lanes.csv");
-        let sampledata = read_samplesheet(samplesheet, 1, 2).unwrap();
+        let sampledata = read_samplesheet(samplesheet, 1).unwrap();
 
-        let test_contents = fs::read_to_string(
-            "test_data/hamming_distance_1_test.txt"
-        ).unwrap();
+        let test_contents = fs::read_to_string("test_data/hamming_distance_1_test.txt").unwrap();
 
-        let expected_lane1_index: HashMap<_, _> = test_contents.split_whitespace()
-            .map( |ix| 
-                (
-                    ix.as_bytes().to_vec(),
-                    ("sample_1".to_string(), "ACTGCGAA".to_string())
-                )
-            )
+        let expected_lane1_index: HashMap<_, _> = test_contents
+            .split_whitespace()
+            .map(|ix| (ix.as_bytes().to_vec(), [0, 0]))
             .collect();
 
         let expected_lane1 = Samples {
             sample_names: vec!["sample_1".to_string()],
-            index: expected_lane1_index, 
-            index2: HashMap::new()
+            index: vec!["ACTGCGAA".to_string()],
+            index2: vec!["".to_string()],
+            index_map: expected_lane1_index,
+            index2_map: HashMap::new(),
         };
 
-        let test_contents = fs::read_to_string(
-            "test_data/hamming_distance_1_test2.txt"
-        ).unwrap();
+        let test_contents = fs::read_to_string("test_data/hamming_distance_1_test2.txt").unwrap();
 
-        let expected_lane2_index: HashMap<_, _> = test_contents.split_whitespace()
-            .map( |ix|
-                (
-                    ix.as_bytes().to_vec(),
-                    ("sample_2".to_string(), "ACTCATCC".to_string())
-                )
-            )
+        let expected_lane2_index: HashMap<_, _> = test_contents
+            .split_whitespace()
+            .map(|ix| (ix.as_bytes().to_vec(), [0, 0]))
             .collect();
 
         let expected_lane2 = Samples {
             sample_names: vec!["sample_2".to_string()],
-            index: expected_lane2_index,
-            index2: HashMap::new()
+            index: vec!["ACTCATCC".to_string()],
+            index2: vec!["".to_string()],
+            index_map: expected_lane2_index,
+            index2_map: HashMap::new(),
         };
 
         let mut expected_sampledata = HashMap::new();
 
-        expected_sampledata.insert(1, vec![expected_lane1]);
-        expected_sampledata.insert(2, vec![expected_lane2]);
+        expected_sampledata.insert(1, expected_lane1);
+        expected_sampledata.insert(2, expected_lane2);
 
         assert_eq!(sampledata, expected_sampledata);
     }
@@ -307,127 +319,119 @@ mod tests {
     #[test]
     fn with_conflict_w_index2_w_lanes() {
         let samplesheet = PathBuf::from(ROOT).join("w_conflict_w_index2_w_lanes.csv");
-        let sampledata = read_samplesheet(samplesheet, 1, 1).unwrap();
+        let sampledata = read_samplesheet(samplesheet, 1).unwrap();
 
-        let samples = vec!["sample_1".to_string(), "sample_2".to_string()];
         let index = vec![b"CCCCT".to_vec(), b"CCCCC".to_vec()];
         let index2 = vec![b"AAAAT".to_vec(), b"AAAAA".to_vec()];
 
-        let expected_index: HashMap<_, _> = index.iter()
-            .zip(samples.iter().cloned())
-            .map( |(ix, sample_name)| 
-                (ix.clone(), (sample_name, String::from_utf8(ix.clone()).unwrap()))
-            )
+        let expected_index: HashMap<_, _> = index
+            .iter()
+            .enumerate()
+            .map(|(i, ix)| (ix.clone(), [i, i]))
             .collect();
 
-        let expected_index2: HashMap<_, _> = index2.iter()
-            .zip(samples.iter().cloned())
-            .map( |(ix, sample_name)| 
-                (ix.clone(), (sample_name, String::from_utf8(ix.clone()).unwrap()))
-            )
+        let expected_index2: HashMap<_, _> = index2
+            .iter()
+            .enumerate()
+            .map(|(i, ix)| (ix.clone(), [i, i]))
             .collect();
 
         let lane_map = sampledata.get(&1).unwrap();
 
-        assert_eq!(lane_map[0].index, expected_index);
-        assert_eq!(lane_map[0].index2, expected_index2);
+        assert_eq!(lane_map.index_map, expected_index);
+        assert_eq!(lane_map.index2_map, expected_index2);
     }
 
     #[test]
     fn with_conflict_in_separate_lanes_w_index2() {
-        let samplesheet = PathBuf::from(ROOT).join(
-            "w_conflict_in_separate_lanes_w_index2.csv"
-        );
-        let sampledata = read_samplesheet(samplesheet, 1, 1).unwrap();
+        let samplesheet = PathBuf::from(ROOT).join("w_conflict_in_separate_lanes_w_index2.csv");
+        let sampledata = read_samplesheet(samplesheet, 1).unwrap();
 
-        let samples = vec!["sample_1".to_string(), "sample_2".to_string()];
-
-        let index = "CCCCT".to_string();
         let index_set: Vec<_> = vec![
-            "CCTCT", "CGCCT", "CCCCT", "CCCCA", "CCACT", "CNCCT", "GCCCT",
-            "CCGCT", "ACCCT", "TCCCT", "CTCCT", "CCCGT", "NCCCT", "CCNCT",
-            "CCCTT", "CCCCG", "CACCT", "CCCCN", "CCCNT", "CCCCC", "CCCAT",
-        ].iter().map(|i| i.as_bytes().to_vec()).collect();
+            "CCTCT", "CGCCT", "CCCCT", "CCCCA", "CCACT", "CNCCT", "GCCCT", "CCGCT", "ACCCT",
+            "TCCCT", "CTCCT", "CCCGT", "NCCCT", "CCNCT", "CCCTT", "CCCCG", "CACCT", "CCCCN",
+            "CCCNT", "CCCCC", "CCCAT",
+        ]
+        .iter()
+        .map(|i| i.as_bytes().to_vec())
+        .collect();
 
-        let index2 = "AAAAA".to_string();
         let index_set2: Vec<_> = vec![
-            "AAAGA", "AGAAA", "AAATA", "AAAAG", "AACAA", "TAAAA", "AAANA",
-            "CAAAA", "NAAAA", "AANAA", "ATAAA", "AAACA", "ACAAA", "AAAAN",
-            "GAAAA", "AATAA", "AAGAA", "AAAAA", "AAAAT", "AAAAC", "ANAAA"
-        ].iter().map(|i| i.as_bytes().to_vec()).collect();
+            "AAAGA", "AGAAA", "AAATA", "AAAAG", "AACAA", "TAAAA", "AAANA", "CAAAA", "NAAAA",
+            "AANAA", "ATAAA", "AAACA", "ACAAA", "AAAAN", "GAAAA", "AATAA", "AAGAA", "AAAAA",
+            "AAAAT", "AAAAC", "ANAAA",
+        ]
+        .iter()
+        .map(|i| i.as_bytes().to_vec())
+        .collect();
 
+        let expected_index: Vec<HashMap<_, _>> = (0..=1)
+            .map(|_| index_set.iter().cloned().map(|ix| (ix, [0, 0])).collect())
+            .collect();
 
-        let expected_index: Vec<HashMap<_, _>> = samples.iter()
-            .map( |sample| {
-                index_set.iter()
-                    .cloned()
-                    .map( |ix|  (ix, (sample.clone(), index.clone())))
-                    .collect()
-            }).collect();
-
-        let expected_index2: Vec<HashMap<_, _>> = samples.iter()
-            .map( |sample| {
-                index_set2.iter()
-                    .cloned()
-                    .map( |ix|  (ix, (sample.clone(), index2.clone())))
-                    .collect()
-            }).collect();
+        let expected_index2: Vec<HashMap<_, _>> = (0..=1)
+            .map(|_| index_set2.iter().cloned().map(|ix| (ix, [0, 0])).collect())
+            .collect();
 
         assert_eq!(sampledata.len(), 2);
         for (lane, lane_map) in sampledata {
-            assert_eq!(lane_map[0].index, expected_index[lane - 1]);
-            assert_eq!(lane_map[0].index2, expected_index2[lane - 1]);
+            assert_eq!(lane_map.index_map, expected_index[lane - 1]);
+            assert_eq!(lane_map.index2_map, expected_index2[lane - 1]);
         }
     }
 
     #[test]
     fn no_conflict_w_index2() {
         let samplesheet = PathBuf::from(ROOT).join("no_conflict_w_index2.csv");
-        let sampledata = read_samplesheet(samplesheet, 1, 1).unwrap();
+        let sampledata = read_samplesheet(samplesheet, 1).unwrap();
 
         let sample_names = vec!["sample_1".to_string(), "sample_2".to_string()];
 
         let mut expected_index = HashMap::new();
 
         for (k, v) in vec![
-            "TGGGG", "GGTGG", "AGGGG", "GGGAG", "GGAGG", "GGGGC", "NGGGG",
-            "GGGCG", "GGNGG", "GCGGG", "GNGGG", "GGGNG", "GGGGA", "GGGGN",
-            "GAGGG", "GGGTG", "GGGGG", "GGCGG", "CGGGG", "GTGGG", "GGGGT"
-        ].iter().map(
-            |i| (i.as_bytes().to_vec(), (sample_names[0].clone(), "GGGGG".to_string()))
-        ) {
+            "TGGGG", "GGTGG", "AGGGG", "GGGAG", "GGAGG", "GGGGC", "NGGGG", "GGGCG", "GGNGG",
+            "GCGGG", "GNGGG", "GGGNG", "GGGGA", "GGGGN", "GAGGG", "GGGTG", "GGGGG", "GGCGG",
+            "CGGGG", "GTGGG", "GGGGT",
+        ]
+        .iter()
+        .map(|ix| (ix.as_bytes().to_vec(), [0, 0]))
+        {
             expected_index.insert(k, v);
         }
 
         for (k, v) in vec![
-            "TCTTT", "TGTTT", "TTGTT", "TATTT", "TTCTT", "TTNTT", "TTTTT",
-            "NTTTT", "ATTTT", "GTTTT", "TTTNT", "TNTTT", "TTTAT", "TTTCT",
-            "TTTTA", "TTTTC", "TTTTG", "CTTTT", "TTTGT", "TTTTN", "TTATT",
-        ].iter().map(
-            |i| (i.as_bytes().to_vec(), (sample_names[1].clone(), "TTTTT".to_string()))
-        ) {
+            "TCTTT", "TGTTT", "TTGTT", "TATTT", "TTCTT", "TTNTT", "TTTTT", "NTTTT", "ATTTT",
+            "GTTTT", "TTTNT", "TNTTT", "TTTAT", "TTTCT", "TTTTA", "TTTTC", "TTTTG", "CTTTT",
+            "TTTGT", "TTTTN", "TTATT",
+        ]
+        .iter()
+        .map(|ix| (ix.as_bytes().to_vec(), [1, 1]))
+        {
             expected_index.insert(k, v);
         }
 
         let mut expected_index2 = HashMap::new();
 
         for (k, v) in vec![
-            "ATAAA", "CAAAA", "AAGAA", "AACAA", "AAAAC", "AAAAG", "AAAAA",
-            "AAATA", "ANAAA", "AAAGA", "AGAAA", "GAAAA", "NAAAA", "ACAAA",
-            "AANAA", "AAAAN", "AAAAT", "AAACA", "AAANA", "TAAAA", "AATAA"   
-        ].iter().map(
-            |i| (i.as_bytes().to_vec(), (sample_names[0].clone(), "AAAAA".to_string()))
-        ) {
+            "ATAAA", "CAAAA", "AAGAA", "AACAA", "AAAAC", "AAAAG", "AAAAA", "AAATA", "ANAAA",
+            "AAAGA", "AGAAA", "GAAAA", "NAAAA", "ACAAA", "AANAA", "AAAAN", "AAAAT", "AAACA",
+            "AAANA", "TAAAA", "AATAA",
+        ]
+        .iter()
+        .map(|ix| (ix.as_bytes().to_vec(), [0, 0]))
+        {
             expected_index2.insert(k, v);
         }
 
         for (k, v) in vec![
-            "CCGCC", "CCNCC", "CCTCC", "TCCCC", "CGCCC", "CCCNC", "ACCCC",
-            "CCCTC", "CCCGC", "CCCAC", "CCCCA", "CACCC", "GCCCC", "CCCCC",
-            "CCCCT", "CTCCC", "CNCCC", "NCCCC", "CCCCG", "CCACC", "CCCCN"            
-        ].iter().map(
-            |i| (i.as_bytes().to_vec(), (sample_names[1].clone(), "CCCCC".to_string()))
-        ) {
+            "CCGCC", "CCNCC", "CCTCC", "TCCCC", "CGCCC", "CCCNC", "ACCCC", "CCCTC", "CCCGC",
+            "CCCAC", "CCCCA", "CACCC", "GCCCC", "CCCCC", "CCCCT", "CTCCC", "CNCCC", "NCCCC",
+            "CCCCG", "CCACC", "CCCCN",
+        ]
+        .iter()
+        .map(|ix| (ix.as_bytes().to_vec(), [1, 1]))
+        {
             expected_index2.insert(k, v);
         }
 
@@ -435,13 +439,13 @@ mod tests {
 
         expected_sampledata.insert(
             0,
-            vec![
-                Samples {
-                    sample_names,
-                    index: expected_index,
-                    index2: expected_index2
-                }
-            ]
+            Samples {
+                sample_names,
+                index: vec!["GGGGG".to_string(), "TTTTT".to_string()],
+                index2: vec!["+AAAAA".to_string(), "+CCCCC".to_string()],
+                index_map: expected_index,
+                index2_map: expected_index2,
+            },
         );
 
         assert_eq!(sampledata, expected_sampledata);
@@ -450,23 +454,21 @@ mod tests {
     #[test]
     fn sample_lookup() {
         let samplesheet = PathBuf::from(ROOT).join("no_conflict_w_index2.csv");
-        let sampledata = read_samplesheet(samplesheet, 1, 1).unwrap();
-        let lane = &sampledata.get(&0).unwrap()[0];
+        let sampledata = read_samplesheet(samplesheet, 1).unwrap();
+        let lane = &sampledata.get(&0).unwrap();
 
         let idx1 = array![71, 84, 71, 71, 71];
         let idx2 = array![65, 65, 65, 65, 65];
-        let idx3 = array![67, 67, 67, 67, 71];
+        let idx3 = array![84, 84, 84, 84, 84];
+        let idx4 = array![67, 67, 67, 67, 71];
 
         // good lookup, one index
-        assert_eq!(
-            lane.get_sample(&[idx1.view()]).unwrap(), 
-            ("sample_1".to_string(), "GGGGG".to_string())
-        );
+        assert_eq!(lane.get_sample(&[idx1.view()]).unwrap(), [0, 0, 0]);
 
         // good lookup, two indices
         assert_eq!(
-            lane.get_sample(&[idx1.view(), idx2.view()]).unwrap(), 
-            ("sample_1".to_string(), "GGGGG+AAAAA".to_string())
+            lane.get_sample(&[idx3.view(), idx4.view()]).unwrap(),
+            [1, 1, 1]
         );
 
         // bad single index
@@ -479,7 +481,7 @@ mod tests {
         assert_eq!(lane.get_sample(&[idx1.view(), idx1.view()]), None);
 
         // indexes match different samples
-        assert_eq!(lane.get_sample(&[idx1.view(), idx3.view()]), None);
+        assert_eq!(lane.get_sample(&[idx1.view(), idx4.view()]), None);
     }
 
     #[test]
@@ -488,32 +490,32 @@ mod tests {
         let mut expected_index = HashMap::new();
 
         for (k, v) in vec![
-            "TGGGG", "GGTGG", "AGGGG", "GGGAG", "GGAGG", "GGGGC", "NGGGG",
-            "GGGCG", "GGNGG", "GCGGG", "GNGGG", "GGGNG", "GGGGA", "GGGGN",
-            "GAGGG", "GGGTG", "GGGGG", "GGCGG", "CGGGG", "GTGGG", "GGGGT"
-        ].iter().map(
-            |i| (i.as_bytes().to_vec(), (sample_names[0].clone(), "GGGGG".to_string()))
-        ) {
+            "TGGGG", "GGTGG", "AGGGG", "GGGAG", "GGAGG", "GGGGC", "NGGGG", "GGGCG", "GGNGG",
+            "GCGGG", "GNGGG", "GGGNG", "GGGGA", "GGGGN", "GAGGG", "GGGTG", "GGGGG", "GGCGG",
+            "CGGGG", "GTGGG", "GGGGT",
+        ]
+        .iter()
+        .map(|i| (i.as_bytes().to_vec(), [0, 0]))
+        {
             expected_index.insert(k, v);
         }
 
         for (k, v) in vec![
-            "TCTTT", "TGTTT", "TTGTT", "TATTT", "TTCTT", "TTNTT", "TTTTT",
-            "NTTTT", "ATTTT", "GTTTT", "TTTNT", "TNTTT", "TTTAT", "TTTCT",
-            "TTTTA", "TTTTC", "TTTTG", "CTTTT", "TTTGT", "TTTTN", "TTATT"
-        ].iter().map(
-            |i| (i.as_bytes().to_vec(), (sample_names[1].clone(), "TTTTT".to_string()))
-        ) {
+            "TCTTT", "TGTTT", "TTGTT", "TATTT", "TTCTT", "TTNTT", "TTTTT", "NTTTT", "ATTTT",
+            "GTTTT", "TTTNT", "TNTTT", "TTTAT", "TTTCT", "TTTTA", "TTTTC", "TTTTG", "CTTTT",
+            "TTTGT", "TTTTN", "TTATT",
+        ]
+        .iter()
+        .map(|ix| (ix.as_bytes().to_vec(), [1, 1]))
+        {
             expected_index.insert(k, v);
         }
 
         let index_vec = vec![b"GGGGG".to_vec(), b"TTTTT".to_vec()];
 
-        let actual_mapping = super::make_sample_maps(
-            &sample_names, &index_vec, &[], 1, 1
-        );
+        let actual_mapping = super::make_sample_maps(&sample_names, &index_vec, &[], 1);
 
-        assert_eq!(actual_mapping[0].index, expected_index);
+        assert_eq!(actual_mapping.index_map, expected_index);
     }
 
     #[test]
@@ -521,94 +523,78 @@ mod tests {
         let sample_names = vec!["sample_1".to_string(), "sample_2".to_string()];
         let index_vec = vec![b"ACTG".to_vec(), b"ACTC".to_vec()];
 
-        let expected_index: HashMap<_, _> = sample_names.iter()
-            .zip(index_vec.iter().cloned())
-            .map( |(sample, ix)| 
-                (ix.clone(), (sample.clone(), String::from_utf8(ix.clone()).unwrap()))
-            )
+        let expected_index: HashMap<_, _> = index_vec
+            .iter()
+            .enumerate()
+            .map(|(sample_i, ix)| (ix.clone(), [sample_i, sample_i]))
             .collect();
 
-        let actual_mapping = super::make_sample_maps(
-            &sample_names, &index_vec, &[], 1, 1
-        );
+        let actual_mapping = super::make_sample_maps(&sample_names, &index_vec, &[], 1);
 
-        assert_eq!(actual_mapping[0].index, expected_index);
+        assert_eq!(actual_mapping.index_map, expected_index);
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"No such file or directory"#
-    )]
+    #[should_panic(expected = r#"No such file or directory"#)]
     fn no_file() {
         let samplesheet = PathBuf::from(ROOT).join("no_file.csv");
-        read_samplesheet(samplesheet, 1, 1).unwrap();
+        read_samplesheet(samplesheet, 1).unwrap();
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"invalid UTF-8 in field 0 near byte index 0"#
-    )]
+    #[should_panic(expected = r#"invalid UTF-8 in field 0 near byte index 0"#)]
     fn bad_file() {
         let samplesheet = PathBuf::from(ROOT).join("bad_file.csv");
-        read_samplesheet(samplesheet, 1, 1).unwrap();
+        read_samplesheet(samplesheet, 1).unwrap();
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"No samples found in samplesheet"#
-    )]
+    #[should_panic(expected = r#"No samples found in samplesheet"#)]
     fn empty_file() {
         let samplesheet = PathBuf::from("test_data/empty_file");
-        read_samplesheet(samplesheet, 1, 1).unwrap();
+        read_samplesheet(samplesheet, 1).unwrap();
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"Can't demux two different samples using the same indices"#
-    )]
+    #[should_panic(expected = r#"Can't demux two different samples using the same indices"#)]
     fn sample_collision() {
         let samplesheet = PathBuf::from(ROOT).join("sample_collision.csv");
-        read_samplesheet(samplesheet, 1, 1).unwrap();
+        read_samplesheet(samplesheet, 1).unwrap();
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"Samplesheet does not have a Sample_Name column"#
-    )]
+    #[should_panic(expected = r#"Samplesheet does not have a Sample_Name column"#)]
     fn no_sample() {
         let samplesheet = PathBuf::from(ROOT).join("no_sample_name.csv");
-        read_samplesheet(samplesheet, 1, 1).unwrap();
+        read_samplesheet(samplesheet, 1).unwrap();
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"Samplesheet does not have an Index column"#
-    )]
+    #[should_panic(expected = r#"Samplesheet does not have an Index column"#)]
     fn no_index() {
         let samplesheet = PathBuf::from(ROOT).join("no_index.csv");
-        read_samplesheet(samplesheet, 1, 1).unwrap();
+        read_samplesheet(samplesheet, 1).unwrap();
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"Samplesheet is missing index2 for some samples"#
-    )]
+    #[should_panic(expected = r#"Samplesheet is missing index2 for some samples"#)]
     fn missing_index() {
         let samplesheet = PathBuf::from(ROOT).join("missing_index.csv");
-        read_samplesheet(samplesheet, 1, 1).unwrap();
+        read_samplesheet(samplesheet, 1).unwrap();
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"Got 3 indices?!"#
-    )]
+    #[should_panic(expected = r#"Got 3 indices?!"#)]
     fn weird_sample_lookup() {
         let samplesheet = PathBuf::from(ROOT).join("no_conflict_w_index2.csv");
-        let sampledata = read_samplesheet(samplesheet, 1, 1).unwrap();
-        let lane = &sampledata.get(&0).unwrap()[0];
+        let sampledata = read_samplesheet(samplesheet, 1).unwrap();
+        let lane = &sampledata.get(&0).unwrap();
 
-        lane.get_sample(
-            &[array![71, 84].view(), array![65, 65].view(), array![65, 65].view()]
-        ).unwrap();
+        lane.get_sample(&[
+            array![71, 84].view(),
+            array![65, 65].view(),
+            array![65, 65].view(),
+        ])
+        .unwrap();
     }
 }

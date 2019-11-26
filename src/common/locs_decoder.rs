@@ -1,23 +1,19 @@
-//! Reads `*.locs` files into vectors of float arrays
+//! Reads `*.locs` files into vectors of u32 arrays by converting the float value to the
+//! scaled integer value that fastq headers have.
 
 use byteorder::{LittleEndian, ReadBytesExt};
-use std::{
-    fs::File,
-    path::Path,
-};
-
+use std::{fs::File, path::Path};
 
 /// Each element is an array of [x, y] locations, one for each cluster in a tile
 pub type Locs = Vec<[u32; 2]>;
 
-
 /// Decode a `.locs` file into a `Locs` struct or panic
-/// 
-/// Format of a `.locs` file: 
+///
+/// Format of a `.locs` file:
 ///  1. Two `u32` containing header info (ignored)
 ///  2. `u32` representing number of clusters (locations)
 ///  3. `[f32; 2 * num_clusters]` of [x, y] pairs
-/// 
+///
 /// To go from f32 to the integer coordinates bcl2fastq outputs, we use the conversion
 /// round((v as f64) * 10. + 1000.) as u32
 pub fn locs_decoder(locs_path: &Path) -> std::io::Result<Locs> {
@@ -32,7 +28,8 @@ pub fn locs_decoder(locs_path: &Path) -> std::io::Result<Locs> {
     rdr.read_f32_into::<LittleEndian>(&mut loc_buffer)?;
 
     // do the bananas conversion to get the right coordinates
-    let loc_buffer: Vec<_> = loc_buffer.iter()
+    let loc_buffer: Vec<_> = loc_buffer
+        .iter()
         .cloned()
         .map(|v| ((v as f64) * 10. + 1000.).round())
         .map(|v| v as u32)
@@ -43,17 +40,16 @@ pub fn locs_decoder(locs_path: &Path) -> std::io::Result<Locs> {
     Ok(locs)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn decode() {
-        let test_file = Path::new(
-            "test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/s.locs"
-        );
+        let test_file =
+            Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/s.locs");
         let actual_locs = locs_decoder(test_file).unwrap();
+        #[rustfmt::skip]
         let expected_locs = vec![
             [1000, 1000], [1018, 1000], [1036, 1000], [1054, 1000], [1072, 1000],
             [1090, 1000], [1108, 1000], [1127, 1000], [1145, 1000], [1163, 1000],
@@ -80,36 +76,28 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"No such file or directory"#
-    )]
+    #[should_panic(expected = r#"No such file or directory"#)]
     fn no_file() {
         let test_file = Path::new("test_data/no_file.locs");
         locs_decoder(test_file).unwrap();
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"failed to fill whole buffer"#
-    )]
+    #[should_panic(expected = r#"failed to fill whole buffer"#)]
     fn empty_file() {
         let test_file = Path::new("test_data/empty_file");
         locs_decoder(test_file).unwrap();
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"failed to fill whole buffer"#
-    )]
+    #[should_panic(expected = r#"failed to fill whole buffer"#)]
     fn bad_8_bytes() {
         let test_file = Path::new("test_data/bad_data_8.bin");
         locs_decoder(test_file).unwrap();
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"failed to fill whole buffer"#
-    )]
+    #[should_panic(expected = r#"failed to fill whole buffer"#)]
     fn bad_12_bytes() {
         let test_file = Path::new("test_data/bad_data_12.bin");
         locs_decoder(test_file).unwrap();

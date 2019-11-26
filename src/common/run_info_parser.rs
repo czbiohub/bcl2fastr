@@ -1,13 +1,9 @@
 //! Deserializes the `RunInfo.xml` file from a NovaSeq run into a useful struct
 //! of information about the sequencing run.
 
-use std::{
-    fs::File,
-    path::Path,
-};
 use serde::{de, Deserialize};
 use serde_xml_rs::from_reader;
-
+use std::{fs::File, path::Path};
 
 /// The top-level struct for the contents of RunInfo.xml
 #[derive(Debug, PartialEq, Eq)]
@@ -30,20 +26,19 @@ pub struct RunInfo {
     pub flowcell_layout: FlowcellLayout,
 }
 
-
 /// Deserialize RunInfo, including flattening the inner Run struct
 /// into the top level
 impl<'de> Deserialize<'de> for RunInfo {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: de::Deserializer<'de>
+        D: de::Deserializer<'de>,
     {
         #[derive(Deserialize)]
         struct Outer {
             #[serde(rename = "Version")]
             version: u32,
             #[serde(rename = "Run")]
-            run: Inner
+            run: Inner,
         }
 
         #[derive(Deserialize)]
@@ -76,10 +71,18 @@ impl<'de> Deserialize<'de> for RunInfo {
         {
             let reads = Reads::deserialize(deserializer)?;
 
-            let reads = reads.read.into_iter().scan(1, |i, r| {
-                *i += r.num_cycles;
-                Some(Read { start: *i - r.num_cycles, end: *i, .. r })
-            }).collect();
+            let reads = reads
+                .read
+                .into_iter()
+                .scan(1, |i, r| {
+                    *i += r.num_cycles;
+                    Some(Read {
+                        start: *i - r.num_cycles,
+                        end: *i,
+                        ..r
+                    })
+                })
+                .collect();
 
             Ok(reads)
         }
@@ -98,7 +101,6 @@ impl<'de> Deserialize<'de> for RunInfo {
         })
     }
 }
-
 
 /// Information about one of the reads in a run
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -122,7 +124,6 @@ pub struct Read {
     pub end: usize,
 }
 
-
 /// Convert from Y or N character to a boolean
 fn bool_from_string<'de, D>(deserializer: D) -> Result<bool, D::Error>
 where
@@ -137,7 +138,6 @@ where
         )),
     }
 }
-
 
 /// Information about the flowcell used in the run
 #[derive(Debug, PartialEq, Eq)]
@@ -158,13 +158,12 @@ pub struct FlowcellLayout {
     pub tiles: Vec<String>,
 }
 
-
 /// Deserialize the FlowcellLayout struct including flattening the interior
 /// TileNamingConvention struct into the top level
 impl<'de> Deserialize<'de> for FlowcellLayout {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: de::Deserializer<'de>
+        D: de::Deserializer<'de>,
     {
         #[derive(Deserialize)]
         struct Outer {
@@ -219,21 +218,17 @@ impl<'de> Deserialize<'de> for FlowcellLayout {
     }
 }
 
-
 /// Parse a `RunInfo.xml` file into a `RunInfo` struct or panic
 pub fn parse_run_info(run_info_path: &Path) -> std::io::Result<RunInfo> {
     let run_xml = File::open(run_info_path)?;
 
     let runinfo: RunInfo = match from_reader(run_xml) {
-        Err(e) => panic!(
-            "Error parsing RunInfo: {}", e
-        ),
+        Err(e) => panic!("Error parsing RunInfo: {}", e),
         Ok(r) => r,
     };
 
     Ok(runinfo)
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -243,77 +238,67 @@ mod tests {
     fn parse() {
         let filename_info = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/RunInfo.xml");
         let actual_runinfo = parse_run_info(filename_info).unwrap();
-        let expected_runinfo =
-            RunInfo {
-                version: 5,
-                id: "190414_A00111_0296_AHJCWWDSXX".to_owned(),
-                number: 296,
-                flowcell: "HJCWWDSXX".to_owned(),
-                instrument: "A00111".to_owned(),
-                date: "4/14/2019 1:17:20 PM".to_owned(),
-                reads: vec![
-                    Read { number: 1, start: 1, end: 5, num_cycles: 4, is_indexed_read: false },
-                    Read { number: 2, start: 5, end: 13, num_cycles: 8, is_indexed_read: true },
-                    Read { number: 3, start: 13, end: 21, num_cycles: 8, is_indexed_read: true },
-                    Read { number: 4, start: 21, end: 25, num_cycles: 4, is_indexed_read: false },
+        #[rustfmt::skip]
+        let expected_runinfo = RunInfo {
+            version: 5,
+            id: "190414_A00111_0296_AHJCWWDSXX".to_owned(),
+            number: 296,
+            flowcell: "HJCWWDSXX".to_owned(),
+            instrument: "A00111".to_owned(),
+            date: "4/14/2019 1:17:20 PM".to_owned(),
+            reads: vec![
+                Read { number: 1, start: 1, end: 5, num_cycles: 4, is_indexed_read: false },
+                Read { number: 2, start: 5, end: 13, num_cycles: 8, is_indexed_read: true },
+                Read { number: 3, start: 13, end: 21, num_cycles: 8, is_indexed_read: true },
+                Read { number: 4, start: 21, end: 25, num_cycles: 4, is_indexed_read: false },
+            ],
+            flowcell_layout: FlowcellLayout {
+                lane_count: 1,
+                surface_count: 1,
+                swath_count: 6,
+                tile_count: 3,
+                flowcell_side: 1,
+                tile_naming_convention: "FourDigit".to_owned(),
+                tiles: vec![
+                    "1_1101".to_owned(),
+                    "1_1102".to_owned(),
+                    "1_1103".to_owned(),
                 ],
-                flowcell_layout: FlowcellLayout {
-                    lane_count: 1,
-                    surface_count: 1,
-                    swath_count: 6,
-                    tile_count: 3,
-                    flowcell_side: 1,
-                    tile_naming_convention: "FourDigit".to_owned(),
-                    tiles: vec![
-                        "1_1101".to_owned(),
-                        "1_1102".to_owned(),
-                        "1_1103".to_owned(),
-                    ]
-                }
-            };
+            },
+        };
         assert_eq!(actual_runinfo, expected_runinfo)
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"No such file or directory"#
-    )]
+    #[should_panic(expected = r#"No such file or directory"#)]
     fn no_file() {
         let filename_info = Path::new("test_data/no_RunInfo.xml");
         parse_run_info(filename_info).unwrap();
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"invalid value: string "Q", expected Y or N"#
-    )]
+    #[should_panic(expected = r#"invalid value: string "Q", expected Y or N"#)]
     fn weird_file() {
         let filename_info = Path::new("test_data/weird_RunInfo.xml");
         parse_run_info(filename_info).unwrap();
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"Error parsing RunInfo: custom: 'missing field `Read`'"#
-    )]
+    #[should_panic(expected = r#"Error parsing RunInfo: custom: 'missing field `Read`'"#)]
     fn no_reads() {
         let filename_info = Path::new("test_data/bad_RunInfo_no_reads.xml");
         parse_run_info(filename_info).unwrap();
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"Error parsing RunInfo: custom: 'missing field `Tile`'"#
-    )]
+    #[should_panic(expected = r#"Error parsing RunInfo: custom: 'missing field `Tile`'"#)]
     fn no_tiles() {
         let filename_info = Path::new("test_data/bad_RunInfo_no_tiles.xml");
         parse_run_info(filename_info).unwrap();
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"1:1 Unexpected end of stream: no root element found"#
-    )]
+    #[should_panic(expected = r#"1:1 Unexpected end of stream: no root element found"#)]
     fn empty_file() {
         let filename_info = Path::new("test_data/empty_file");
         parse_run_info(filename_info).unwrap();

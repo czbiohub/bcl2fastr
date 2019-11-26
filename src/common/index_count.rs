@@ -1,18 +1,15 @@
 //! Extract only the indexes from a run and count them
 
-use std::{
-    fs::File,
-    io::prelude::*,
-    path::PathBuf,
-};
+use std::{fs::File, io::prelude::*, path::PathBuf};
 
 use counter::Counter;
 use rayon::prelude::*;
 
-use crate::cbcl_header_decoder::CBCLHeader;
-use crate::novaseq_run::NovaSeqRun;
-use crate::extract_reads::extract_indices;
+use ndarray::{Array3, ShapeBuilder};
 
+use crate::cbcl_header_decoder::CBCLHeader;
+use crate::extract_reads::extract_read_block;
+use crate::novaseq_run::NovaSeqRun;
 
 fn count_tile_chunk(
     i: usize,
@@ -20,28 +17,52 @@ fn count_tile_chunk(
     headers: &[Vec<CBCLHeader>],
     filter: &[bool],
     pf_filter: &[bool],
-    n_counts: usize
+    n_counts: usize,
 ) -> Counter<Vec<u8>> {
     let n_pf = pf_filter.iter().map(|&b| if b { 1 } else { 0 }).sum();
+    let mut index_arrays: Vec<Array3<u8>> = headers
+        .iter()
+        .map(|h| Array3::zeros((h.len(), n_pf, 2).f()))
+        .collect();
+
     let mut read_buffer = vec![0u8; max_vec_size];
+    let mut decompression_buffer = vec![0u32; 4 * max_vec_size];
 
-    let index_arrays = extract_indices(
-        headers, filter, pf_filter, &mut read_buffer, i, n_pf
-    );
+    for (idx_h, idx_array) in headers.iter().zip(index_arrays.iter_mut()) {
+        extract_read_block(
+            idx_h,
+            filter,
+            pf_filter,
+            &mut idx_array.slice_mut(ndarray::s![..idx_h.len(), ..n_pf, ..]),
+            &mut read_buffer,
+            &mut decompression_buffer,
+            i,
+        );
+    }
 
-    let this_count: Counter<Vec<u8>> = (0..n_pf).map( |i| 
-        index_arrays.iter().map(
-            |arr| arr.slice(ndarray::s![.., i, 0]).to_vec()
-        ).collect::<Vec<_>>().join(&b'+')
-    ).collect();
+    let this_count: Counter<Vec<u8>> = (0..n_pf)
+        .map(|i| {
+            index_arrays
+                .iter()
+                .map(|arr| arr.slice(ndarray::s![.., i, 0]).to_vec())
+                .collect::<Vec<_>>()
+                .join(&b'+')
+        })
+        .collect();
 
-    this_count.most_common().iter().take(n_counts).cloned().collect()
+    this_count
+        .most_common()
+        .iter()
+        .take(n_counts)
+        .cloned()
+        .collect()
 }
-
 
 /// Iterate through all lanes and surfaces and count indexes
 pub fn index_count(
-    novaseq_run: &NovaSeqRun, output_path: PathBuf, top_n_counts: usize
+    novaseq_run: &NovaSeqRun,
+    output_path: PathBuf,
+    top_n_counts: usize,
 ) -> Result<(), &'static str> {
     let mut out_file = match File::create(output_path) {
         Ok(out_file) => out_file,
@@ -59,10 +80,11 @@ pub fn index_count(
             let pf_filters = novaseq_run.pf_filters.get(&[lane, surface]).unwrap();
             let idx_headers = novaseq_run.index_headers.get(&[lane, surface]).unwrap();
 
-            let this_count: Counter<Vec<u8>> = filters.par_iter()
+            let this_count: Counter<Vec<u8>> = filters
+                .par_iter()
                 .zip(pf_filters)
                 .enumerate()
-                .map( |(i, (filter, pf_filter))| {
+                .map(|(i, (filter, pf_filter))| {
                     count_tile_chunk(
                         i,
                         novaseq_run.max_vec_size,
@@ -71,10 +93,8 @@ pub fn index_count(
                         pf_filter,
                         top_8n_counts,
                     )
-                }).reduce(
-                    Counter::new,
-                    |a, b| a + b
-                );
+                })
+                .reduce(Counter::new, |a, b| a + b);
 
             println!("done, adding to counts");
             counts += this_count;
@@ -83,11 +103,12 @@ pub fn index_count(
 
     for (elem, freq) in counts.most_common_ordered().iter().take(top_n_counts) {
         writeln!(
-            &mut out_file, 
-            "{}\t{}", 
+            &mut out_file,
+            "{}\t{}",
             unsafe { String::from_utf8_unchecked(elem.to_vec()) },
             freq
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     Ok(())
@@ -108,9 +129,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(
-        expected = r#"No such file or directory"#
-    )]
+    #[should_panic(expected = r#"No such file or directory"#)]
     fn index_count_bad_path() {
         let run_path = PathBuf::from("test_data/190414_A00111_0296_AHJCWWDSXX");
         let output_path = PathBuf::from("test_data/wrong_test_output/index_counts.txt");
