@@ -43,23 +43,23 @@ fn main() {
                 .takes_value(true),
         )
         .arg(
-            Arg::with_name("chunks")
-                .long("chunks")
-                .help("number of tile-chunks to load into memory at once")
-                .default_value("4")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("tile-chunk")
-                .long("tile-chunk")
-                .help("number of tiles to group together while reading")
-                .default_value("2")
+            Arg::with_name("read-chunks")
+                .long("read-chunks")
+                .help("number of tiles to process at once while reading")
+                .default_value("39")
                 .takes_value(true),
         )
         .arg(
             Arg::with_name("mismatch")
                 .long("mismatch")
                 .help("maximum hamming distance to allow for indexes")
+                .default_value("1")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("compression")
+                .long("compression")
+                .help("compression level for gzipped output")
                 .default_value("1")
                 .takes_value(true),
         )
@@ -84,9 +84,9 @@ fn main() {
     }
 
     let n_threads = value_t!(matches, "threads", usize).unwrap_or_else(|e| e.exit());
-    let n_chunks = value_t!(matches, "chunks", usize).unwrap_or_else(|e| e.exit());
-    let t_chunk = value_t!(matches, "tile-chunk", usize).unwrap_or_else(|e| e.exit());
+    let r_chunks = value_t!(matches, "read-chunks", usize).unwrap_or_else(|e| e.exit());
     let mismatch = value_t!(matches, "mismatch", usize).unwrap_or_else(|e| e.exit());
+    let compression = value_t!(matches, "compression", u32).unwrap_or_else(|e| e.exit());
 
     ThreadPoolBuilder::new()
         .num_threads(n_threads)
@@ -98,12 +98,20 @@ fn main() {
         Err(e) => panic!("Error reading samplesheet: {}", e),
     };
 
-    let novaseq_run = match NovaSeqRun::read_path(run_path, t_chunk, false) {
+    let novaseq_run = match NovaSeqRun::read_path(run_path, false) {
         Ok(n_run) => n_run,
         Err(e) => panic!("Error reading NovaSeq run: {}", e),
     };
 
     for (lane, sample_vec) in sample_data {
-        demux_fastqs(&novaseq_run, lane, &sample_vec, &output_path, n_chunks).unwrap();
+        demux_fastqs(
+            &novaseq_run,
+            lane,
+            &sample_vec,
+            &output_path,
+            r_chunks,
+            compression,
+        )
+        .unwrap();
     }
 }

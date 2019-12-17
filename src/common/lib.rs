@@ -1,3 +1,4 @@
+mod base_decoder;
 mod cbcl_header_decoder;
 mod extract_reads;
 mod filter_decoder;

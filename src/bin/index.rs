@@ -35,13 +35,6 @@ fn main() {
                 .takes_value(true),
         )
         .arg(
-            Arg::with_name("tile-chunk")
-                .long("tile-chunk")
-                .help("number of tiles to extract at a time")
-                .default_value("2")
-                .takes_value(true),
-        )
-        .arg(
             Arg::with_name("top-n")
                 .long("top-n")
                 .help("return the top N index counts")
@@ -65,7 +58,6 @@ fn main() {
     }
 
     let threads = value_t!(matches, "threads", usize).unwrap_or_else(|e| e.exit());
-    let tile_chunk = value_t!(matches, "tile-chunk", usize).unwrap_or_else(|e| e.exit());
     let top_n = value_t!(matches, "top-n", usize).unwrap_or_else(|e| e.exit());
 
     ThreadPoolBuilder::new()
@@ -73,7 +65,7 @@ fn main() {
         .build_global()
         .unwrap_or_else(|e| panic!("Error configuring global threadpool: {}", e));
 
-    let novaseq_run = match NovaSeqRun::read_path(run_path, tile_chunk, true) {
+    let novaseq_run = match NovaSeqRun::read_path(run_path, true) {
         Ok(n_run) => n_run,
         Err(e) => panic!("Error reading NovaSeq run: {}", e),
     };

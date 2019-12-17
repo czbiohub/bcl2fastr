@@ -4,9 +4,9 @@ use byteorder::{LittleEndian, ReadBytesExt};
 
 use std::{fs::File, io::Read, path::Path};
 
-/// A filter is a vector of booleans representing whether each cluster
-/// in a tile has passed quality filtering.
-pub type Filter = Vec<bool>;
+/// A filter is a vector of bytes representing pairs of booleans,
+/// e.g. (false, false) = 0, (true, false) = 2, etc
+pub type Filter = Vec<u8>;
 
 /// Decode a `.filter` file into a `Filter` struct or panic
 ///
@@ -23,8 +23,12 @@ pub fn filter_decoder(filter_path: &Path) -> std::io::Result<Filter> {
 
     let mut bin_mask = vec![0u8; num_clusters];
     rdr.read_exact(&mut bin_mask)?;
+    // if length is off, add extra 0
+    if num_clusters % 2 == 1 {
+        bin_mask.push(0);
+    }
 
-    let filter = bin_mask.into_iter().map(|x| x != 0).collect();
+    let filter = bin_mask.chunks_exact(2).map(|x| 2 * x[0] + x[1]).collect();
 
     Ok(filter)
 }
@@ -35,17 +39,12 @@ mod tests {
 
     #[test]
     fn decode() {
-        let test_file = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX/Data/Intensities/BaseCalls/L001/s_1_1101.filter");
-        let actual_filter = filter_decoder(test_file).unwrap();
+        let test_file = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX")
+            .join("Data/Intensities/BaseCalls/L001/s_1_1101.filter");
+        let actual_filter = filter_decoder(&test_file).unwrap();
         let expected_filter = vec![
-            false, false, false, true, true, true, true, true, false, false, true, false, true,
-            true, true, true, true, true, true, true, true, false, true, true, true, true, true,
-            true, true, true, true, true, true, true, true, true, true, true, true, true, false,
-            true, true, true, true, true, true, true, true, true, false, true, true, true, true,
-            true, true, true, true, false, true, true, true, true, false, true, true, true, true,
-            true, true, false, true, true, true, false, false, true, true, true, true, false, true,
-            true, true, true, true, true, true, false, true, true, false, false, true, true, true,
-            false, false, false,
+            0, 1, 3, 3, 0, 2, 3, 3, 3, 3, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1, 3, 3, 3, 3, 1, 3, 3, 3,
+            2, 3, 3, 1, 3, 3, 2, 3, 2, 1, 3, 2, 3, 3, 3, 2, 3, 0, 3, 2, 0,
         ];
         assert_eq!(actual_filter, expected_filter);
     }

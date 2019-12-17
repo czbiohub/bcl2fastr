@@ -4,6 +4,7 @@
 use std::collections::HashSet;
 
 use itertools::Itertools;
+use rayon::prelude::*;
 
 /// makes a single-element HashSet from a vector of bytes
 pub fn singleton_set(index: &Vec<u8>) -> HashSet<Vec<u8>> {
@@ -47,6 +48,7 @@ pub fn check_conflict(
         .iter()
         .zip(index_sets.iter())
         .tuple_combinations()
+        .par_bridge()
         .filter_map(|((s1, hset1), (s2, hset2))| {
             if s1 != s2 && hset1.intersection(hset2).count() > 0 {
                 Some((std::cmp::min(s1, s2), std::cmp::max(s1, s2)))
@@ -68,6 +70,7 @@ pub fn check_conflict(
         .iter()
         .zip(index2_sets.iter())
         .tuple_combinations()
+        .par_bridge()
         .filter_map(|((s1, hset1), (s2, hset2))| {
             if s1 != s2 && hset1.intersection(hset2).count() > 0 {
                 Some((std::cmp::min(s1, s2), std::cmp::max(s1, s2)))

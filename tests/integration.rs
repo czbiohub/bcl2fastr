@@ -88,7 +88,7 @@ mod integration {
     }
 
     #[test]
-    fn bad_tile_chunk() {
+    fn bad_read_chunk() {
         let mut cmd = Command::cargo_bin(crate_name!()).unwrap();
         cmd.args(&[
             "--run-path",
@@ -97,7 +97,7 @@ mod integration {
             "test_data/190414_A00111_0296_AHJCWWDSXX/SampleSheet.csv",
             "--output",
             "test_data/test_output",
-            "--tile-chunk",
+            "--read-chunks",
             "not_a_number",
         ]);
 

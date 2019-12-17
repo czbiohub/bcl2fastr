@@ -21,8 +21,7 @@ pub struct CBCLHeader {
     pub tiles: Vec<u32>,
     pub non_pf_clusters_excluded: bool,
     pub start_pos: Vec<u64>,
-    pub uncompressed_size: Vec<usize>,
-    pub compressed_size: Vec<usize>,
+    pub uncompressed_size: Vec<u64>,
 }
 
 impl CBCLHeader {
@@ -43,9 +42,9 @@ impl CBCLHeader {
     ///     3. Uncompressed block size
     ///     4. Compressed block size
     ///     
-    ///     Note: we only store the tile number, and compute chunked block sizes
+    ///     Note: we only store the tile number, and compute chunked uncompressed block sizes
     ///  9. `u8` flag for whether this file is only reads that pass quality filtering
-    pub fn from_path(cbcl_path: &Path, tile_chunk: usize) -> std::io::Result<Self> {
+    pub fn from_path(cbcl_path: &Path) -> std::io::Result<Self> {
         let mut rdr = File::open(cbcl_path)?;
 
         let version = rdr.read_u16::<LittleEndian>()?;
@@ -84,19 +83,10 @@ impl CBCLHeader {
                 *pos += t[3];
                 Some(*pos - t[3])
             })
-            .step_by(tile_chunk)
             .map(|v| v as u64)
             .collect();
 
-        let uncompressed_size: Vec<usize> = tile_offsets
-            .chunks(tile_chunk)
-            .map(|c| c.iter().map(|v| v[2]).sum::<u32>() as usize)
-            .collect();
-
-        let compressed_size: Vec<usize> = tile_offsets
-            .chunks(tile_chunk)
-            .map(|c| c.iter().map(|v| v[3]).sum::<u32>() as usize)
-            .collect();
+        let uncompressed_size: Vec<_> = tile_offsets.iter().map(|c| c[2] as u64).collect();
 
         Ok(CBCLHeader {
             cbcl_path: cbcl_path.to_path_buf(),
@@ -111,7 +101,6 @@ impl CBCLHeader {
             non_pf_clusters_excluded,
             start_pos,
             uncompressed_size,
-            compressed_size,
         })
     }
 }
@@ -124,7 +113,7 @@ mod tests {
     fn decode() {
         let cbcl_path = Path::new("test_data/190414_A00111_0296_AHJCWWDSXX")
             .join("Data/Intensities/BaseCalls/L001/C1.1/L001_1.cbcl");
-        let actual_cbclheader = CBCLHeader::from_path(&cbcl_path, 2).unwrap();
+        let actual_cbclheader = CBCLHeader::from_path(&cbcl_path).unwrap();
         let expected_cbclheader = CBCLHeader {
             cbcl_path: cbcl_path.to_path_buf(),
             version: 1,
@@ -136,9 +125,8 @@ mod tests {
             num_tile_records: 3,
             tiles: vec![1101, 1102, 1103],
             non_pf_clusters_excluded: false,
-            start_pos: vec![97, 243],
-            uncompressed_size: vec![100, 50],
-            compressed_size: vec![146, 73],
+            start_pos: vec![97, 170, 243],
+            uncompressed_size: vec![50, 50, 50],
         };
         assert_eq!(actual_cbclheader, expected_cbclheader)
     }
@@ -147,13 +135,13 @@ mod tests {
     #[should_panic(expected = r#"No such file or directory"#)]
     fn no_file() {
         let cbcl_path = Path::new("test_data/no_file.cbcl");
-        CBCLHeader::from_path(cbcl_path, 2).unwrap();
+        CBCLHeader::from_path(cbcl_path).unwrap();
     }
 
     #[test]
     #[should_panic(expected = r#"failed to fill whole buffer"#)]
     fn bad_file() {
         let cbcl_path = Path::new("test_data/bad_data_8.bin");
-        CBCLHeader::from_path(cbcl_path, 2).unwrap();
+        CBCLHeader::from_path(cbcl_path).unwrap();
     }
 }
