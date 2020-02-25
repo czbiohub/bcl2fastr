@@ -1,4 +1,4 @@
 ﻿[Data],,
-Sample_Name,Index,Index2
-sample_1,GGGGG,AAAAA
-sample_2,TTTTT,CCCCC
+Sample_Name,Sample_Project,Index,Index2
+sample_1,project_1,GGGGG,AAAAA
+sample_2,project_2,TTTTT,CCCCC

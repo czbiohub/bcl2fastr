@@ -1,6 +1,11 @@
 //! Extract the reads from a run and write them out to fastq.gz files
 
-use std::{fs::OpenOptions, io::prelude::*, path::PathBuf};
+use std::{
+    collections::HashMap,
+    fs::{create_dir, File, OpenOptions},
+    io::prelude::*,
+    path::PathBuf,
+};
 
 use flate2::write::GzEncoder;
 use ndarray::{Array3, ArrayView3, Axis, ShapeBuilder};
@@ -14,16 +19,35 @@ use crate::sample_data::Samples;
 fn make_filename(
     output_path: &PathBuf,
     sample_name: &String,
+    sample_project: &Option<String>,
     lane: usize,
     read_num: usize,
-) -> PathBuf {
+) -> std::io::Result<PathBuf> {
+    let sample_path = match sample_project {
+        Some(project_name) => output_path.join(project_name),
+        None => output_path.to_path_buf(),
+    };
+
+    if !sample_path.exists() {
+        create_dir(&sample_path).unwrap();
+    }
+
     if lane == 0 {
-        output_path.join(format!("{}_R{}.fastq.gz", sample_name, read_num))
+        Ok(sample_path.join(format!("{}_R{}.fastq.gz", sample_name, read_num)))
     } else {
-        output_path.join(format!(
+        Ok(sample_path.join(format!(
             "{}_L{:03}_R{}.fastq.gz",
             sample_name, lane, read_num
-        ))
+        )))
+    }
+}
+
+/// helper function to construct the report filename, depending on lane splitting
+fn make_report_filename(output_path: &PathBuf, lane: usize) -> PathBuf {
+    if lane == 0 {
+        output_path.join(format!("barcode_report.txt"))
+    } else {
+        output_path.join(format!("barcode_L{:03}_report.txt", lane))
     }
 }
 
@@ -47,8 +71,14 @@ fn get_sample_filepaths(
     for read_num in 1..=num_reads {
         let mut read_filepaths = Vec::new();
 
-        for sample_name in samples.sample_names.iter() {
-            let file_path = make_filename(output_path, sample_name, lane_n, read_num);
+        for (sample_name, sample_project) in samples
+            .sample_names
+            .iter()
+            .zip(samples.project_names.iter())
+        {
+            let file_path =
+                make_filename(output_path, sample_name, sample_project, lane_n, read_num)?;
+
             if file_path.exists() {
                 std::fs::remove_file(&file_path)?;
                 removed_files += 1;
@@ -63,6 +93,40 @@ fn get_sample_filepaths(
     Ok(sample_filepaths)
 }
 
+/// iterate over the index arrays and count up all the reads that match sample data,
+/// keeping track of whether they are an exact match to the index or not
+fn count_reads(
+    samples: &Samples,
+    sample_i: usize,
+    max_n_pf: usize,
+    index_array: &Array3<u8>,
+    index_slices: &[[usize; 2]],
+) -> (u64, u64) {
+    let mut n_reads = 0u64; // exact matches
+    let mut m_reads = 0u64; // other matches
+
+    index_array
+        .axis_iter(Axis(1))
+        .take(max_n_pf)
+        .for_each(|ix_row| {
+            let indices: Vec<_> = index_slices
+                .iter()
+                .cloned()
+                .map(|[i0, i1]| ix_row.slice(ndarray::s![i0..i1, 0]))
+                .collect();
+
+            if samples.get_sample(sample_i, &indices) {
+                n_reads += 1;
+                if !samples.is_exact(sample_i, &indices) {
+                    m_reads += 1;
+                }
+            }
+        });
+
+    (n_reads, m_reads)
+}
+
+/// write the reads for a given sample to a fastq.gz file
 fn write_reads(
     novaseq_run: &NovaSeqRun,
     samples: &Samples,
@@ -122,6 +186,38 @@ fn write_reads(
         });
 }
 
+/// write the read count (# total, exact, and mismatch reads) to a text file
+fn write_report(
+    report_filepath: &PathBuf,
+    samples: &Samples,
+    sample_counts: &HashMap<usize, (u64, u64)>,
+) {
+    let mut report_out_file = match File::create(report_filepath) {
+        Ok(out_file) => out_file,
+        Err(e) => panic!("Error creating file: {}", e),
+    };
+
+    report_out_file
+        .write_all(b"sample_name\ttotal_reads\texact_index\tindex_with_error\n")
+        .unwrap();
+
+    // sort the counts so that the output is stable
+    let mut count_vec: Vec<_> = sample_counts.iter().collect();
+    count_vec.sort_by_key(|(&k, _)| k);
+
+    for (sample_i, (n_reads, m_reads)) in count_vec {
+        writeln!(
+            report_out_file,
+            "{}\t{}\t{}\t{}",
+            samples.sample_names[sample_i.clone()],
+            n_reads + m_reads,
+            n_reads,
+            m_reads
+        )
+        .unwrap();
+    }
+}
+
 /// Iterate through all lanes and surfaces of a run and extract tiles in chunks
 pub fn demux_fastqs(
     novaseq_run: &NovaSeqRun,
@@ -136,6 +232,11 @@ pub fn demux_fastqs(
         Ok(sample_fs) => sample_fs,
         Err(e) => panic!("Couldn't clear existing files: {}", e),
     };
+    // keep track of per-sample counts and output to a report text file
+    let mut sample_counts: HashMap<usize, (u64, u64)> = (0..samples.sample_names.len())
+        .map(|sample_i| (sample_i, (0u64, 0u64)))
+        .collect();
+    let report_filepath = make_report_filename(output_path, lane_n);
 
     println!(
         "sample files: {}",
@@ -300,6 +401,22 @@ pub fn demux_fastqs(
                         });
                 }
 
+                // 1a. count the reads for each sample
+                sample_counts
+                    .par_iter_mut()
+                    .for_each(|(sample_i, (n_reads, m_reads))| {
+                        let (lane_n, lane_m) = count_reads(
+                            samples,
+                            sample_i.clone(),
+                            max_n_pf,
+                            &index_array,
+                            &idx_slices,
+                        );
+
+                        *n_reads += lane_n;
+                        *m_reads += lane_m;
+                    });
+
                 // 2. per read:
                 for (k, (read_h, read_files)) in read_headers.iter().zip(&sample_files).enumerate()
                 {
@@ -367,6 +484,8 @@ pub fn demux_fastqs(
         }
     }
 
+    write_report(&report_filepath, samples, &sample_counts);
+
     Ok(())
 }
 
@@ -381,12 +500,28 @@ mod tests {
     fn make_filename() {
         let output_path = PathBuf::from("test_data/test_output");
         let sample_name = "sample_1".to_string();
+        let project_name = Some("project_1".to_string());
 
-        let file_name1 = super::make_filename(&output_path, &sample_name, 0, 1);
-        assert_eq!(file_name1, output_path.join("sample_1_R1.fastq.gz"));
+        let file_name1 =
+            super::make_filename(&output_path, &sample_name, &project_name, 0, 1).unwrap();
+        assert_eq!(
+            file_name1,
+            output_path.join("project_1").join("sample_1_R1.fastq.gz")
+        );
 
-        let file_name2 = super::make_filename(&output_path, &sample_name, 1, 2);
+        let file_name2 = super::make_filename(&output_path, &sample_name, &None, 1, 2).unwrap();
         assert_eq!(file_name2, output_path.join("sample_1_L001_R2.fastq.gz"));
+    }
+
+    #[test]
+    fn make_report_filename() {
+        let output_path = PathBuf::from("test_data/test_output");
+
+        let file_name1 = super::make_report_filename(&output_path, 0);
+        assert_eq!(file_name1, output_path.join("barcode_report.txt"));
+
+        let file_name2 = super::make_report_filename(&output_path, 1);
+        assert_eq!(file_name2, output_path.join("barcode_L001_report.txt"));
     }
 
     #[test]

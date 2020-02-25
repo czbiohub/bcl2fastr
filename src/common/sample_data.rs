@@ -25,7 +25,10 @@ pub type SampleData = HashMap<usize, Samples>;
 #[derive(Debug, PartialEq)]
 pub struct Samples {
     pub sample_names: Vec<String>,
+    pub project_names: Vec<Option<String>>,
+    index_vec: Vec<Vec<u8>>,
     index_map: Vec<HashSet<Vec<u8>>>,
+    index2_vec: Vec<Vec<u8>>,
     index2_map: Vec<HashSet<Vec<u8>>>,
 }
 
@@ -35,6 +38,31 @@ impl Samples {
         match indices.len() {
             1 => self.get_1index_sample(i, indices[0]),
             2 => self.get_2index_sample(i, indices[0], indices[1]),
+            x => panic!("Got {} indices?!", x),
+        }
+    }
+
+    /// Check if the indices are exact matches
+    pub fn is_exact(&self, i: usize, indices: &[ArrayView1<u8>]) -> bool {
+        match indices.len() {
+            1 => self.index_vec[i] == indices[0].as_slice().unwrap(),
+            2 => {
+                self.index_vec[i] == indices[0].as_slice().unwrap()
+                    && self.index2_vec[i] == indices[1].as_slice().unwrap()
+            }
+            x => panic!("Got {} indices?!", x),
+        }
+    }
+
+    /// Checks if the indices match any of the samples
+    pub fn is_any_sample(&self, indices: &[Vec<u8>]) -> bool {
+        match indices.len() {
+            1 => self.index_map.iter().any(|idx| idx.contains(&indices[0])),
+            2 => self
+                .index_map
+                .iter()
+                .zip(self.index2_map.iter())
+                .any(|(idx, idx2)| idx.contains(&indices[0]) && idx2.contains(&indices[1])),
             x => panic!("Got {} indices?!", x),
         }
     }
@@ -55,6 +83,7 @@ impl Samples {
 /// which will include the necessary error-correction, up to some limit `max_distance`
 fn make_sample_maps(
     sample_names: &[String],
+    project_names: &[Option<String>],
     index_vec: &[Vec<u8>],
     index2_vec: &[Vec<u8>],
     max_distance: usize,
@@ -72,6 +101,20 @@ fn make_sample_maps(
         "Samplesheet is missing index2 for some samples"
     );
 
+    // sample for sample_project: full or empty, nothing in between
+    let n_project_names = project_names.iter().cloned().filter_map(|n| n).count();
+    assert!(
+        n_project_names == sample_names.len() || n_project_names == 0,
+        "Samplesheet is missing project names for some samples"
+    );
+
+    // (for now) sample names should be unique, or we'll have conflicts
+    assert_eq!(
+        sample_names.len(),
+        sample_names.iter().cloned().collect::<HashSet<_>>().len(),
+        "Sample names must be unique"
+    );
+
     // start at distance 0: just map samples to indices
     let mut index_hash_sets: Vec<_> = index_vec.iter().map(singleton_set).collect();
     let mut index2_hash_sets: Vec<_> = index2_vec.iter().map(singleton_set).collect();
@@ -80,12 +123,16 @@ fn make_sample_maps(
         panic!("Can't demux two different samples using the same indices");
     }
 
-    for _ in 1..=max_distance {
+    for i in 1..=max_distance {
         let new_index_hash_sets: Vec<_> = index_hash_sets.par_iter().map(hamming_set).collect();
-
         let new_index2_hash_sets: Vec<_> = index2_hash_sets.par_iter().map(hamming_set).collect();
 
         if check_conflict(&sample_names, &new_index_hash_sets, &new_index2_hash_sets) {
+            println!(
+                "Warning: conflict at distance {}, using {} instead",
+                i,
+                i - 1
+            );
             break;
         }
 
@@ -95,7 +142,10 @@ fn make_sample_maps(
 
     Samples {
         sample_names: sample_names.to_vec(),
+        project_names: project_names.to_vec(),
+        index_vec: index_vec.to_vec(),
         index_map: index_hash_sets,
+        index2_vec: index2_vec.to_vec(),
         index2_map: index2_hash_sets,
     }
 }
@@ -145,11 +195,17 @@ pub fn read_samplesheet(samplesheet: PathBuf, max_distance: usize) -> std::io::R
             None => 0,
         };
 
-        let (sample_name, sample_idx, sample_idx2) = lanes
+        let (sample_names, project_names, sample_idx, sample_idx2) = lanes
             .entry(lane)
-            .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new()));
+            .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
 
-        sample_name.push(record.get(&"Sample_Name").unwrap().to_string());
+        sample_names.push(record.get(&"Sample_Name").unwrap().to_string());
+        match record.get(&"Sample_Project") {
+            Some(&project_name) if project_name.len() > 0 => {
+                project_names.push(Some(project_name.to_string()))
+            }
+            Some(_) | None => project_names.push(None),
+        }
         match record.get(&"Index") {
             Some(&idx) if idx.len() > 0 => sample_idx.push(idx.as_bytes().to_vec()),
             Some(_) | None => (),
@@ -157,15 +213,15 @@ pub fn read_samplesheet(samplesheet: PathBuf, max_distance: usize) -> std::io::R
         match record.get(&"Index2") {
             Some(&idx2) if idx2.len() > 0 => sample_idx2.push(idx2.as_bytes().to_vec()),
             Some(_) | None => (),
-        };
+        }
     }
 
     let sample_data: HashMap<_, _> = lanes
         .iter()
-        .map(|(&i, (smp_names, idx_vec, idx2_vec))| {
+        .map(|(&i, (sample_names, project_names, idx_vec, idx2_vec))| {
             (
                 i,
-                make_sample_maps(smp_names, idx_vec, idx2_vec, max_distance),
+                make_sample_maps(sample_names, project_names, idx_vec, idx2_vec, max_distance),
             )
         })
         .collect();
@@ -196,7 +252,10 @@ mod tests {
 
         let expected_lane1 = Samples {
             sample_names: vec!["sample_1".to_string()],
+            project_names: vec![None],
+            index_vec: vec![vec![65, 67, 84, 71, 67, 71, 65, 65]],
             index_map: expected_lane1_index,
+            index2_vec: Vec::new(),
             index2_map: Vec::new(),
         };
 
@@ -209,7 +268,10 @@ mod tests {
 
         let expected_lane2 = Samples {
             sample_names: vec!["sample_2".to_string()],
+            project_names: vec![None],
+            index_vec: vec![vec![65, 67, 84, 67, 65, 84, 67, 67]],
             index_map: expected_lane2_index,
+            index2_vec: Vec::new(),
             index2_map: Vec::new(),
         };
 
@@ -277,6 +339,7 @@ mod tests {
         let sampledata = read_samplesheet(samplesheet, 1).unwrap();
 
         let sample_names = vec!["sample_1".to_string(), "sample_2".to_string()];
+        let project_names = vec![Some("project_1".to_string()), Some("project_2".to_string())];
 
         let mut expected_index = Vec::new();
 
@@ -332,8 +395,11 @@ mod tests {
             0,
             Samples {
                 sample_names,
+                project_names,
                 index_map: expected_index,
+                index_vec: vec![vec![71, 71, 71, 71, 71], vec![84, 84, 84, 84, 84]],
                 index2_map: expected_index2,
+                index2_vec: vec![vec![65, 65, 65, 65, 65], vec![67, 67, 67, 67, 67]],
             },
         );
 
@@ -371,8 +437,68 @@ mod tests {
     }
 
     #[test]
+    fn sample_check() {
+        let samplesheet = PathBuf::from(ROOT).join("no_conflict_w_index2.csv");
+        let sampledata = read_samplesheet(samplesheet, 1).unwrap();
+        let lane = &sampledata.get(&0).unwrap();
+
+        let idx1 = array![71, 71, 71, 71, 71];
+        let idx2 = array![65, 65, 65, 65, 65];
+        let idx1a = array![71, 71, 71, 71, 65];
+        let idx2g = array![65, 65, 65, 65, 71];
+
+        // exact lookup, one index
+        assert!(lane.is_exact(0, &[idx1.view()]));
+
+        // exact lookup, two indices
+        assert!(lane.is_exact(0, &[idx1.view(), idx2.view()]));
+
+        // not exact lookup single index
+        assert!(!lane.is_exact(0, &[idx1a.view()]));
+
+        // not exact index, two indices
+        assert!(!lane.is_exact(0, &[idx1.view(), idx2g.view()]));
+        assert!(!lane.is_exact(0, &[idx1a.view(), idx2.view()]));
+        assert!(!lane.is_exact(0, &[idx1a.view(), idx2g.view()]));
+    }
+
+    #[test]
+    fn any_sample_check() {
+        let samplesheet = PathBuf::from(ROOT).join("no_conflict_w_index2.csv");
+        let sampledata = read_samplesheet(samplesheet, 1).unwrap();
+        let lane = &sampledata.get(&0).unwrap();
+
+        let idx1 = vec![71, 71, 71, 71, 71];
+        let idx2 = vec![65, 65, 65, 65, 65];
+        let idx3 = vec![84, 84, 84, 84, 84];
+        let idx4 = vec![67, 67, 67, 67, 67];
+
+        let idx1a = vec![71, 71, 71, 71, 65];
+        let idx2g = vec![65, 65, 65, 65, 71];
+
+        // any sample, one index
+        assert!(lane.is_any_sample(&[idx1.clone()]));
+        assert!(lane.is_any_sample(&[idx1a.clone()]));
+        assert!(lane.is_any_sample(&[idx3.clone()]));
+
+        // any sample, two indices
+        assert!(lane.is_any_sample(&[idx1.clone(), idx2.clone()]));
+        assert!(lane.is_any_sample(&[idx1a.clone(), idx2g.clone()]));
+        assert!(lane.is_any_sample(&[idx3.clone(), idx4.clone()]));
+
+        // no sample, one index
+        assert!(!lane.is_any_sample(&[idx2.clone()]));
+
+        // no sample, two indices
+        assert!(!lane.is_any_sample(&[idx2.clone(), idx1.clone()]));
+        assert!(!lane.is_any_sample(&[idx1a.clone(), idx3.clone()]));
+        assert!(!lane.is_any_sample(&[idx4.clone(), idx4.clone()]));
+    }
+
+    #[test]
     fn make_sample_maps() {
         let sample_names = vec!["sample_1".to_string(), "sample_2".to_string()];
+        let project_names = vec![Some("project_1".to_string()), Some("project_2".to_string())];
         let mut expected_index = Vec::new();
 
         expected_index.push(
@@ -399,7 +525,8 @@ mod tests {
 
         let index_vec = vec![b"GGGGG".to_vec(), b"TTTTT".to_vec()];
 
-        let actual_mapping = super::make_sample_maps(&sample_names, &index_vec, &[], 1);
+        let actual_mapping =
+            super::make_sample_maps(&sample_names, &project_names, &index_vec, &[], 1);
 
         assert_eq!(actual_mapping.index_map, expected_index);
     }
@@ -407,11 +534,13 @@ mod tests {
     #[test]
     fn make_sample_maps_conflict() {
         let sample_names = vec!["sample_1".to_string(), "sample_2".to_string()];
+        let project_names = Vec::new();
         let index_vec = vec![b"ACTG".to_vec(), b"ACTC".to_vec()];
 
         let expected_index: Vec<_> = index_vec.iter().map(singleton_set).collect();
 
-        let actual_mapping = super::make_sample_maps(&sample_names, &index_vec, &[], 1);
+        let actual_mapping =
+            super::make_sample_maps(&sample_names, &project_names, &index_vec, &[], 1);
 
         assert_eq!(actual_mapping.index_map, expected_index);
     }
@@ -466,6 +595,13 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = r#"Samplesheet is missing project names for some samples"#)]
+    fn missing_project() {
+        let samplesheet = PathBuf::from(ROOT).join("missing_project.csv");
+        read_samplesheet(samplesheet, 1).unwrap();
+    }
+
+    #[test]
     #[should_panic(expected = r#"Got 3 indices?!"#)]
     fn weird_sample_lookup() {
         let samplesheet = PathBuf::from(ROOT).join("no_conflict_w_index2.csv");
@@ -480,5 +616,32 @@ mod tests {
                 array![65, 65].view(),
             ],
         );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"Got 3 indices?!"#)]
+    fn weird_sample_check() {
+        let samplesheet = PathBuf::from(ROOT).join("no_conflict_w_index2.csv");
+        let sampledata = read_samplesheet(samplesheet, 1).unwrap();
+        let lane = &sampledata.get(&0).unwrap();
+
+        lane.is_exact(
+            0,
+            &[
+                array![71, 84].view(),
+                array![65, 65].view(),
+                array![65, 65].view(),
+            ],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = r#"Got 3 indices?!"#)]
+    fn weird_any_sample_check() {
+        let samplesheet = PathBuf::from(ROOT).join("no_conflict_w_index2.csv");
+        let sampledata = read_samplesheet(samplesheet, 1).unwrap();
+        let lane = &sampledata.get(&0).unwrap();
+
+        lane.is_any_sample(&[vec![71, 84], vec![65, 65], vec![65, 65]]);
     }
 }

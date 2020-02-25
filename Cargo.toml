@@ -16,6 +16,10 @@ path = "src/bin/demux.rs"
 name = "bcl2index"
 path = "src/bin/index.rs"
 
+[[bin]]
+name = "filter_index"
+path = "src/bin/filter_index.rs"
+
 [lib]
 name = "common"
 path = "src/common/lib.rs"

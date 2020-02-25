@@ -23,7 +23,7 @@ fn main() {
         .arg(
             Arg::with_name("output")
                 .long("output")
-                .help("output path for fastq files")
+                .help("output path for index count file")
                 .takes_value(true)
                 .required(true),
         )
