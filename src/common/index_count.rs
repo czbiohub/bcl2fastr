@@ -109,6 +109,8 @@ pub fn index_count(
         .unwrap();
     }
 
+    out_file.flush().unwrap();
+
     Ok(())
 }
 
