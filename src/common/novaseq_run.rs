@@ -81,7 +81,12 @@ impl NovaSeqRun {
                                 format!("L{:03}/C{}.1/L{:03}_{}.cbcl", lane, cycle, lane, surface,),
                             );
 
-                            CBCLHeader::from_path(&cbcl_path).unwrap()
+                            match CBCLHeader::from_path(&cbcl_path) {
+                                Ok(header) => header,
+                                Err(e) => {
+                                    panic!("Error reading header {} {}", cbcl_path.display(), e)
+                                }
+                            }
                         })
                         .collect();
 
@@ -106,7 +111,12 @@ impl NovaSeqRun {
                             "Data/Intensities/BaseCalls/L{:03}/s_{}_{}.filter",
                             lane, lane, tile,
                         ));
-                        let filter = filter_decoder(&filter_path).unwrap();
+                        let filter = match filter_decoder(&filter_path) {
+                            Ok(filter) => filter,
+                            Err(e) => {
+                                panic!("Error reading filter {} {}", filter_path.display(), e)
+                            }
+                        };
 
                         (tile.clone(), filter)
                     })
