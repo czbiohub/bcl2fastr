@@ -316,7 +316,7 @@ pub fn demux_fastqs(
     println!("buffer size: {:?}", buffer_array.raw_dim());
 
     for lane in lane_iter {
-        for surface in 1..=novaseq_run.run_info.flowcell_layout.surface_count {
+        for surface in novaseq_run.run_info.flowcell_layout.surface_range.clone() {
             // check to make sure the data is here. Only relevant for testing
             if !novaseq_run.read_headers.contains_key(&[lane, surface]) {
                 continue;

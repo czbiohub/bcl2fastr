@@ -63,7 +63,7 @@ impl NovaSeqRun {
         let mut n_pfs = HashMap::new();
 
         for lane in 1..=run_info.flowcell_layout.lane_count {
-            for surface in 1..=run_info.flowcell_layout.surface_count {
+            for surface in run_info.flowcell_layout.surface_range.clone() {
                 println!("lane {} - surface {}", lane, surface);
 
                 let mut lane_surface_read_headers = Vec::new();
@@ -78,7 +78,7 @@ impl NovaSeqRun {
                         .into_par_iter()
                         .map(|cycle| {
                             let cbcl_path = run_path.join("Data/Intensities/BaseCalls").join(
-                                format!("L{:03}/C{}.1/L{:03}_{}.cbcl", lane, cycle, lane, surface,),
+                                format!("L{:03}/C{}.1/L{:03}_{}.cbcl", lane, cycle, lane, surface),
                             );
 
                             match CBCLHeader::from_path(&cbcl_path) {

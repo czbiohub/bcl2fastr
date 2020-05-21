@@ -76,7 +76,7 @@ pub fn index_count(
     let mut counts: Counter<Vec<u8>> = Counter::new();
 
     for lane in 1..=novaseq_run.run_info.flowcell_layout.lane_count {
-        for surface in 1..=novaseq_run.run_info.flowcell_layout.surface_count {
+        for surface in novaseq_run.run_info.flowcell_layout.surface_range.clone() {
             println!("indexing lane {} surface {}", lane, surface);
 
             let filters = novaseq_run.filters.get(&[lane, surface]).unwrap();

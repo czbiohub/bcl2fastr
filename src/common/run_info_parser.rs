@@ -3,7 +3,7 @@
 
 use serde::{de, Deserialize};
 use serde_xml_rs::from_reader;
-use std::{fs::File, path::Path};
+use std::{fs::File, ops::RangeInclusive, path::Path};
 
 /// The top-level struct for the contents of RunInfo.xml
 #[derive(Debug, PartialEq, Eq)]
@@ -144,8 +144,8 @@ where
 pub struct FlowcellLayout {
     /// Number of lanes
     pub lane_count: usize,
-    /// Number of surfaces per lane
-    pub surface_count: usize,
+    /// the surfaces on the flowcell. usually 1..=2 but sometimes 2..=2
+    pub surface_range: RangeInclusive<usize>,
     /// Swathes per lane
     pub swath_count: u64,
     /// Number of tiles per swath
@@ -206,9 +206,17 @@ impl<'de> Deserialize<'de> for FlowcellLayout {
 
         let helper = Outer::deserialize(deserializer)?;
 
+        let surface_start = helper
+            .tile_set
+            .tiles
+            .iter()
+            .filter_map(|t| t.chars().nth(2).unwrap().to_digit(10))
+            .min()
+            .unwrap();
+
         Ok(FlowcellLayout {
             lane_count: helper.lane_count,
-            surface_count: helper.surface_count,
+            surface_range: (surface_start as usize)..=helper.surface_count,
             swath_count: helper.swath_count,
             tile_count: helper.tile_count,
             flowcell_side: helper.flowcell_side,
@@ -254,7 +262,7 @@ mod tests {
             ],
             flowcell_layout: FlowcellLayout {
                 lane_count: 1,
-                surface_count: 1,
+                surface_range: 1..=1,
                 swath_count: 6,
                 tile_count: 3,
                 flowcell_side: 1,
