@@ -98,17 +98,15 @@ fn get_sample_filepaths(
 fn count_reads(
     samples: &Samples,
     sample_i: usize,
-    max_n_pf: usize,
-    index_array: &Array3<u8>,
+    n_pf: usize,
+    index_array: &ArrayView3<u8>,
     index_slices: &[[usize; 2]],
-) -> (u64, u64) {
-    let mut n_reads = 0u64; // exact matches
-    let mut m_reads = 0u64; // other matches
-
-    index_array
+) -> [u64; 2] {
+    let read_count = index_array
         .axis_iter(Axis(1))
-        .take(max_n_pf)
-        .for_each(|ix_row| {
+        .take(n_pf)
+        .par_bridge()
+        .filter_map(|ix_row| {
             let indices: Vec<_> = index_slices
                 .iter()
                 .cloned()
@@ -116,14 +114,18 @@ fn count_reads(
                 .collect();
 
             if samples.get_sample(sample_i, &indices) {
-                n_reads += 1;
                 if !samples.is_exact(sample_i, &indices) {
-                    m_reads += 1;
+                    return Some([0, 1]);
+                } else {
+                    return Some([1, 0]);
                 }
             }
-        });
 
-    (n_reads, m_reads)
+            return None;
+        })
+        .reduce(|| [0, 0], |a, b| [a[0] + b[0], a[1] + b[1]]);
+
+    read_count
 }
 
 /// write the reads for a given sample to a fastq.gz file
@@ -190,7 +192,7 @@ fn write_reads(
 fn write_report(
     report_filepath: &PathBuf,
     samples: &Samples,
-    sample_counts: &HashMap<usize, (u64, u64)>,
+    sample_counts: &HashMap<usize, [u64; 2]>,
 ) {
     let mut report_out_file = match File::create(report_filepath) {
         Ok(out_file) => out_file,
@@ -205,7 +207,7 @@ fn write_report(
     let mut count_vec: Vec<_> = sample_counts.iter().collect();
     count_vec.sort_by_key(|(&k, _)| k);
 
-    for (sample_i, (n_reads, m_reads)) in count_vec {
+    for (sample_i, [n_reads, m_reads]) in count_vec {
         writeln!(
             report_out_file,
             "{}\t{}\t{}\t{}",
@@ -233,8 +235,8 @@ pub fn demux_fastqs(
         Err(e) => panic!("Couldn't clear existing files: {}", e),
     };
     // keep track of per-sample counts and output to a report text file
-    let mut sample_counts: HashMap<usize, (u64, u64)> = (0..samples.sample_names.len())
-        .map(|sample_i| (sample_i, (0u64, 0u64)))
+    let mut sample_counts: HashMap<usize, [u64; 2]> = (0..samples.sample_names.len())
+        .map(|sample_i| (sample_i, [0u64; 2]))
         .collect();
     let report_filepath = make_report_filename(output_path, lane_n);
 
@@ -402,19 +404,23 @@ pub fn demux_fastqs(
                 }
 
                 // 1a. count the reads for each sample
-                sample_counts
-                    .par_iter_mut()
-                    .for_each(|(sample_i, (n_reads, m_reads))| {
-                        let (lane_n, lane_m) = count_reads(
-                            samples,
-                            sample_i.clone(),
-                            max_n_pf,
-                            &index_array,
-                            &idx_slices,
-                        );
-
-                        *n_reads += lane_n;
-                        *m_reads += lane_m;
+                index_array
+                    .axis_chunks_iter(Axis(1), max_n_pf)
+                    .zip(n_pf_chunk)
+                    .for_each(|(ix_array, &n_pf)| {
+                        sample_counts
+                            .par_iter_mut()
+                            .for_each(|(sample_i, [n_reads, m_reads])| {
+                                let [lane_n, lane_m] = count_reads(
+                                    samples,
+                                    sample_i.clone(),
+                                    n_pf,
+                                    &ix_array,
+                                    &idx_slices,
+                                );
+                                *n_reads += lane_n;
+                                *m_reads += lane_m;
+                            });
                     });
 
                 // 2. per read:
