@@ -91,4 +91,4 @@ sample_name	total_reads	exact_index	index_with_error
 8034211112	2	2	0
 8034211535	6	6	0
 8034211101	5	5	0
-Neg-moz-p2	0	0	0
+Neg	0	0	0

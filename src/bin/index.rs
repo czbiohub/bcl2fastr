@@ -3,11 +3,14 @@
 
 use clap::{value_t, App, Arg};
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use common::index_count::index_count;
 use common::novaseq_run::NovaSeqRun;
 
+use log::info;
 use rayon::ThreadPoolBuilder;
+use stderrlog;
 
 /// Parses command line arguments and runs demux
 fn main() {
@@ -41,7 +44,50 @@ fn main() {
                 .default_value("384")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("verbosity")
+                .short("v")
+                .multiple(true)
+                .help("Increase message verbosity"),
+        )
+        .arg(
+            Arg::with_name("quiet")
+                .short("q")
+                .help("Silence all output"),
+        )
+        .arg(
+            Arg::with_name("timestamp")
+                .short("t")
+                .help("prepend log lines with a timestamp")
+                .takes_value(true)
+                .possible_values(&["none", "sec", "ms", "ns"]),
+        )
         .get_matches();
+
+    let verbose = matches.occurrences_of("verbosity") as usize;
+    let quiet = matches.is_present("quiet");
+    let ts = matches
+        .value_of("timestamp")
+        .map(|v| {
+            stderrlog::Timestamp::from_str(v).unwrap_or_else(|_| {
+                clap::Error {
+                    message: "invalid value for 'timestamp'".into(),
+                    kind: clap::ErrorKind::InvalidValue,
+                    info: None,
+                }
+                .exit()
+            })
+        })
+        .unwrap_or(stderrlog::Timestamp::Off);
+
+    stderrlog::new()
+        .module(module_path!())
+        .module("common")
+        .quiet(quiet)
+        .verbosity(verbose)
+        .timestamp(ts)
+        .init()
+        .unwrap();
 
     let run_path = PathBuf::from(matches.value_of("run-path").unwrap());
     if !run_path.exists() {
@@ -70,7 +116,8 @@ fn main() {
         Err(e) => panic!("Error reading NovaSeq run: {}", e),
     };
 
-    println!("Finished loading novaseq run");
-    println!("Counting indexes");
+    info!("Finished loading novaseq run");
+    info!("Counting indexes");
     index_count(&novaseq_run, output_path, top_n).unwrap();
+    info!("Done");
 }

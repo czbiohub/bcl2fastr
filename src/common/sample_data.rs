@@ -5,6 +5,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
+use log::warn;
 use ndarray::ArrayView1;
 use rayon::prelude::*;
 
@@ -128,7 +129,7 @@ fn make_sample_maps(
         let new_index2_hash_sets: Vec<_> = index2_hash_sets.par_iter().map(hamming_set).collect();
 
         if check_conflict(&sample_names, &new_index_hash_sets, &new_index2_hash_sets) {
-            println!(
+            warn!(
                 "Warning: conflict at distance {}, using {} instead",
                 i,
                 i - 1

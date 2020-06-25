@@ -11,6 +11,8 @@ use crate::cbcl_header_decoder::CBCLHeader;
 use crate::extract_reads::extract_cbcl;
 use crate::novaseq_run::NovaSeqRun;
 
+use log::{debug, info};
+
 fn count_tile_chunk(
     tile_i: usize,
     headers: &[Vec<CBCLHeader>],
@@ -67,6 +69,7 @@ pub fn index_count(
     output_path: PathBuf,
     top_n_counts: usize,
 ) -> Result<(), &'static str> {
+    info!("writing to {}", output_path.display());
     let mut out_file = match File::create(output_path) {
         Ok(out_file) => out_file,
         Err(e) => panic!("Error creating file: {}", e),
@@ -75,9 +78,11 @@ pub fn index_count(
     let top_8n_counts = top_n_counts * 8;
     let mut counts: Counter<Vec<u8>> = Counter::new();
 
+    info!("Counting indexes");
     for lane in 1..=novaseq_run.run_info.flowcell_layout.lane_count {
+        debug!("Starting lane {}", lane);
         for surface in novaseq_run.run_info.flowcell_layout.surface_range.clone() {
-            println!("indexing lane {} surface {}", lane, surface);
+            debug!("Starting surface {}", surface);
 
             let filters = novaseq_run.filters.get(&[lane, surface]).unwrap();
             let pf_filters = novaseq_run.pf_filters.get(&[lane, surface]).unwrap();
@@ -94,11 +99,13 @@ pub fn index_count(
                 })
                 .reduce(Counter::new, |a, b| a + b);
 
-            println!("done, adding to counts");
+            debug!("Done with {} - {}, adding to counts", lane, surface);
             counts += this_count;
         }
+        debug!("Lane {} complete", lane);
     }
 
+    debug!("Writing counts");
     for (elem, freq) in counts.most_common_ordered().iter().take(top_n_counts) {
         writeln!(
             &mut out_file,

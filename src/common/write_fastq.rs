@@ -8,6 +8,7 @@ use std::{
 };
 
 use flate2::write::GzEncoder;
+use log::{debug, info};
 use ndarray::{Array3, ArrayView3, Axis, ShapeBuilder};
 use rayon::prelude::*;
 
@@ -88,7 +89,7 @@ fn get_sample_filepaths(
         sample_filepaths.push(read_filepaths);
     }
 
-    println!("removed {} files", removed_files);
+    debug!("removed {} files", removed_files);
 
     Ok(sample_filepaths)
 }
@@ -240,7 +241,7 @@ pub fn demux_fastqs(
         .collect();
     let report_filepath = make_report_filename(output_path, lane_n);
 
-    println!(
+    info!(
         "sample files: {}",
         sample_files.iter().map(|sf| sf.len()).sum::<usize>()
     );
@@ -289,12 +290,12 @@ pub fn demux_fastqs(
     // leave space between index cycles for '+' and at the end for '\n'
     let n_idx_cycles = idx_reads.len() + idx_reads.iter().map(|r| r.num_cycles).sum::<usize>();
 
-    println!("max_cycles: {}", n_cycles);
+    debug!("max_cycles: {}", n_cycles);
 
     // find the highest numbers of reads among the chunks of tiles
     let max_n_pf = novaseq_run.n_pfs.values().flatten().cloned().max().unwrap();
 
-    println!("max_n_pf: {}", max_n_pf);
+    debug!("max_n_pf: {}", max_n_pf);
 
     // this array is big enough to hold all of the reads/qscores for a chunk of tiles,
     // which is basically all of the data we ever load. So as long as it fits in memory,
@@ -315,7 +316,7 @@ pub fn demux_fastqs(
     // preallocate vectors for loc tuples
     let mut locs_vecs = vec![Vec::with_capacity(max_n_pf); n_chunks];
 
-    println!("buffer size: {:?}", buffer_array.raw_dim());
+    debug!("buffer size: {:?}", buffer_array.raw_dim());
 
     for lane in lane_iter {
         for surface in novaseq_run.run_info.flowcell_layout.surface_range.clone() {
@@ -324,7 +325,7 @@ pub fn demux_fastqs(
                 continue;
             }
 
-            println!("extracting lane {} surface {}", lane, surface);
+            info!("Extracting lane {} surface {}", lane, surface);
 
             let read_headers = novaseq_run.read_headers.get(&[lane, surface]).unwrap();
             let idx_headers = novaseq_run.index_headers.get(&[lane, surface]).unwrap();
@@ -342,7 +343,7 @@ pub fn demux_fastqs(
                 .zip(n_pfs.chunks(n_chunks))
                 .enumerate()
             {
-                println!("read chunk {}", i);
+                debug!("Read chunk {}", i);
 
                 // 1. par_iter over rows/index cycles
                 // 2. per read:
@@ -370,7 +371,7 @@ pub fn demux_fastqs(
                         }
                     });
 
-                println!("reading indices");
+                debug!("Reading indices");
                 // 1. chunk_mut the array and par_iter the indexes into it by cycle
                 for (idx_vec, [idx_0, idx_1]) in idx_headers.iter().zip(idx_slices.iter().cloned())
                 {
@@ -404,6 +405,7 @@ pub fn demux_fastqs(
                 }
 
                 // 1a. count the reads for each sample
+                debug!("Counting reads");
                 index_array
                     .axis_chunks_iter(Axis(1), max_n_pf)
                     .zip(n_pf_chunk)
@@ -426,7 +428,7 @@ pub fn demux_fastqs(
                 // 2. per read:
                 for (k, (read_h, read_files)) in read_headers.iter().zip(&sample_files).enumerate()
                 {
-                    println!("reading data for read {}", k + 1);
+                    debug!("reading data for read {}", k + 1);
                     // 3. par_iter over cycles and read the data in
                     buffer_array
                         .axis_chunks_iter_mut(Axis(1), max_n_pf)
@@ -454,7 +456,7 @@ pub fn demux_fastqs(
                                 });
                         });
 
-                    println!("writing out read {}", k + 1);
+                    debug!("writing out read {}", k + 1);
                     // 4. par_iter the reads into files.
                     // It's possible/likely that n_samples >> n_threads, but they will block
                     // on i/o and so this should maximize CPU usage (maybe)

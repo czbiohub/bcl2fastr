@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use log::{debug, info};
 use rayon::prelude::*;
 
 use crate::cbcl_header_decoder::CBCLHeader;
@@ -64,7 +65,7 @@ impl NovaSeqRun {
 
         for lane in 1..=run_info.flowcell_layout.lane_count {
             for surface in run_info.flowcell_layout.surface_range.clone() {
-                println!("lane {} - surface {}", lane, surface);
+                info!("lane {} - surface {}", lane, surface);
 
                 let mut lane_surface_read_headers = Vec::new();
                 let mut lane_surface_index_headers = Vec::new();
@@ -139,7 +140,7 @@ impl NovaSeqRun {
                     })
                     .unzip_into_vecs(&mut lane_surface_n_pfs, &mut lane_surface_pf_filters);
 
-                println!("loaded {} filters and ids", lane_surface_filters.len());
+                info!("loaded {} filters and ids", lane_surface_filters.len());
 
                 filters.insert([lane, surface], lane_surface_filters);
                 pf_filters.insert([lane, surface], lane_surface_pf_filters);
@@ -170,6 +171,8 @@ impl NovaSeqRun {
         } else {
             panic!("Got {} different qscore maps!", qscore_maps.len());
         }
+
+        debug!("qscore map: {:?}", qscore_maps);
 
         let novaseq_run = NovaSeqRun {
             run_path,
