@@ -9,6 +9,7 @@ use common::novaseq_run::NovaSeqRun;
 use common::sample_data::read_samplesheet;
 use common::write_fastq::demux_fastqs;
 
+use log::info;
 use rayon::ThreadPoolBuilder;
 
 /// Parses command line arguments and runs demux
@@ -128,7 +129,7 @@ fn main() {
     }
 
     let n_threads = value_t!(matches, "threads", usize).unwrap_or_else(|e| e.exit());
-    let r_chunks = value_t!(matches, "read-chunks", usize).unwrap_or_else(|e| e.exit());
+    let n_tiles = value_t!(matches, "read-chunks", usize).unwrap_or_else(|e| e.exit());
     let mismatch = value_t!(matches, "mismatch", usize).unwrap_or_else(|e| e.exit());
     let compression = value_t!(matches, "compression", u32).unwrap_or_else(|e| e.exit());
 
@@ -153,9 +154,10 @@ fn main() {
             lane,
             &sample_vec,
             &output_path,
-            r_chunks,
+            n_tiles,
             compression,
         )
         .unwrap();
     }
+    info!("Demux complete");
 }

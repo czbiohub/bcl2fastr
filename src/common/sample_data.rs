@@ -18,11 +18,9 @@ pub type SampleData = HashMap<usize, Samples>;
 
 /// The Samples struct has one or two maps that go from potential indices to sample
 /// and corrected index strings. To save space and for speed, we save the original
-/// data as a vector and use integers to index into them.
+/// data as a vector and use integers everywhere else
 ///
-/// If there is only one index, index2 will contain a single empty string. If there are
-/// two indices index2 will contain the original index with a '+' prepended. This makes
-/// it very easy to print out the correct header later.
+/// If there is only one index, index2 will contain a single empty string.
 #[derive(Debug, PartialEq)]
 pub struct Samples {
     pub sample_names: Vec<String>,

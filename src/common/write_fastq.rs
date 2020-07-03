@@ -1,7 +1,6 @@
 //! Extract the reads from a run and write them out to fastq.gz files
 
 use std::{
-    collections::HashMap,
     fs::{create_dir, File, OpenOptions},
     io::prelude::*,
     path::PathBuf,
@@ -94,41 +93,6 @@ fn get_sample_filepaths(
     Ok(sample_filepaths)
 }
 
-/// iterate over the index arrays and count up all the reads that match sample data,
-/// keeping track of whether they are an exact match to the index or not
-fn count_reads(
-    samples: &Samples,
-    sample_i: usize,
-    n_pf: usize,
-    index_array: &ArrayView3<u8>,
-    index_slices: &[[usize; 2]],
-) -> [u64; 2] {
-    let read_count = index_array
-        .axis_iter(Axis(1))
-        .take(n_pf)
-        .par_bridge()
-        .filter_map(|ix_row| {
-            let indices: Vec<_> = index_slices
-                .iter()
-                .cloned()
-                .map(|[i0, i1]| ix_row.slice(ndarray::s![i0..i1, 0]))
-                .collect();
-
-            if samples.get_sample(sample_i, &indices) {
-                if !samples.is_exact(sample_i, &indices) {
-                    return Some([0, 1]);
-                } else {
-                    return Some([1, 0]);
-                }
-            }
-
-            return None;
-        })
-        .reduce(|| [0, 0], |a, b| [a[0] + b[0], a[1] + b[1]]);
-
-    read_count
-}
-
 /// write the reads for a given sample to a fastq.gz file
 fn write_reads(
     novaseq_run: &NovaSeqRun,
@@ -143,7 +107,7 @@ fn write_reads(
     lane: usize,
     read_num: usize,
     compression: u32,
-) {
+) -> [u64; 2] {
     // create gz writer for this sample, or open for appending
     let out_file = match OpenOptions::new()
         .create(true)
@@ -155,6 +119,9 @@ fn write_reads(
     };
 
     let mut gz_writer = GzEncoder::new(out_file, flate2::Compression::new(compression));
+
+    // array for holding count of exact and inexact matches
+    let mut read_counts = [0u64; 2];
 
     buffer_array
         .axis_iter(Axis(1))
@@ -168,6 +135,12 @@ fn write_reads(
                 .collect();
 
             if samples.get_sample(sample_i, &indices) {
+                if samples.is_exact(sample_i, &indices) {
+                    read_counts[0] += 1;
+                } else {
+                    read_counts[1] += 1;
+                }
+
                 write!(
                     gz_writer,
                     "{}:{}:{}:{}:{} {}:N:0:",
@@ -187,14 +160,12 @@ fn write_reads(
                 gz_writer.write_all(b"\n").unwrap();
             }
         });
+
+    read_counts
 }
 
 /// write the read count (# total, exact, and mismatch reads) to a text file
-fn write_report(
-    report_filepath: &PathBuf,
-    samples: &Samples,
-    sample_counts: &HashMap<usize, [u64; 2]>,
-) {
+fn write_report(report_filepath: &PathBuf, samples: &Samples, sample_counts: &Vec<[u64; 2]>) {
     let mut report_out_file = match File::create(report_filepath) {
         Ok(out_file) => out_file,
         Err(e) => panic!("Error creating file: {}", e),
@@ -204,11 +175,7 @@ fn write_report(
         .write_all(b"sample_name\ttotal_reads\texact_index\tindex_with_error\n")
         .unwrap();
 
-    // sort the counts so that the output is stable
-    let mut count_vec: Vec<_> = sample_counts.iter().collect();
-    count_vec.sort_by_key(|(&k, _)| k);
-
-    for (sample_i, [n_reads, m_reads]) in count_vec {
+    for (sample_i, [n_reads, m_reads]) in sample_counts.iter().enumerate() {
         writeln!(
             report_out_file,
             "{}\t{}\t{}\t{}",
@@ -227,7 +194,7 @@ pub fn demux_fastqs(
     lane_n: usize,
     samples: &Samples,
     output_path: &PathBuf,
-    n_chunks: usize,
+    n_tiles: usize,
     compression: u32,
 ) -> Result<(), &'static str> {
     // 0. check for existing files and get shared file -> path map
@@ -235,10 +202,11 @@ pub fn demux_fastqs(
         Ok(sample_fs) => sample_fs,
         Err(e) => panic!("Couldn't clear existing files: {}", e),
     };
-    // keep track of per-sample counts and output to a report text file
-    let mut sample_counts: HashMap<usize, [u64; 2]> = (0..samples.sample_names.len())
-        .map(|sample_i| (sample_i, [0u64; 2]))
-        .collect();
+    // two columns, for exact and inexact matches
+    let mut sample_counts = vec![[0u64; 2]; samples.sample_names.len()];
+    // a temporary vector to hold count info while processing
+    let mut chunk_count: Vec<[u64; 2]> = Vec::with_capacity(samples.sample_names.len());
+
     let report_filepath = make_report_filename(output_path, lane_n);
 
     info!(
@@ -254,9 +222,7 @@ pub fn demux_fastqs(
         lane_n..=lane_n
     };
 
-    // compute max array depth needed for data. There is a chance that the total index
-    // length is longer than the longest read (for instance, in test data) so we account
-    // for that here
+    // compute max array depth needed for data
     let n_cycles = novaseq_run
         .run_info
         .reads
@@ -278,6 +244,7 @@ pub fn demux_fastqs(
         .filter(|r| r.is_indexed_read)
         .collect();
 
+    // slices into the index array, including padding for extra characters needed for output
     let idx_slices: Vec<_> = idx_reads
         .iter()
         .scan(0, |k, r| {
@@ -300,8 +267,8 @@ pub fn demux_fastqs(
     // this array is big enough to hold all of the reads/qscores for a chunk of tiles,
     // which is basically all of the data we ever load. So as long as it fits in memory,
     // everything should be okay...
-    let mut buffer_array = Array3::zeros((n_cycles, n_chunks * max_n_pf, 2).f());
-    let mut index_array = Array3::zeros((n_idx_cycles, n_chunks * max_n_pf, 2).f());
+    let mut buffer_array = Array3::zeros((n_cycles, n_tiles * max_n_pf, 2).f());
+    let mut index_array = Array3::zeros((n_idx_cycles, n_tiles * max_n_pf, 2).f());
 
     index_array
         .index_axis_mut(Axis(0), n_idx_cycles - 1)
@@ -314,7 +281,7 @@ pub fn demux_fastqs(
     }
 
     // preallocate vectors for loc tuples
-    let mut locs_vecs = vec![Vec::with_capacity(max_n_pf); n_chunks];
+    let mut locs_vecs = vec![Vec::with_capacity(max_n_pf); n_tiles];
 
     debug!("buffer size: {:?}", buffer_array.raw_dim());
 
@@ -334,13 +301,13 @@ pub fn demux_fastqs(
             let tile_ids = novaseq_run.tile_ids.get(&[lane, surface]).unwrap();
             let n_pfs = novaseq_run.n_pfs.get(&[lane, surface]).unwrap();
 
-            // n_chunks defines how many tiles we extract at a time. We read all the tiles
+            // n_tiles defines how many tiles we extract at a time. We read all the tiles
             // in parallel within the chunk and across cycles, to maximize CPU and IO usage
             for (i, (((f_chunk, pff_chunk), tid_chunk), n_pf_chunk)) in filters
-                .chunks(n_chunks)
-                .zip(pf_filters.chunks(n_chunks))
-                .zip(tile_ids.chunks(n_chunks))
-                .zip(n_pfs.chunks(n_chunks))
+                .chunks(n_tiles)
+                .zip(pf_filters.chunks(n_tiles))
+                .zip(tile_ids.chunks(n_tiles))
+                .zip(n_pfs.chunks(n_tiles))
                 .enumerate()
             {
                 debug!("Read chunk {}", i);
@@ -351,7 +318,7 @@ pub fn demux_fastqs(
                 //    4. par_iter the reads into output files
 
                 // beginning of this chunk
-                let chunk_i = i * n_chunks;
+                let chunk_i = i * n_tiles;
 
                 f_chunk
                     .par_iter()
@@ -404,27 +371,6 @@ pub fn demux_fastqs(
                         });
                 }
 
-                // 1a. count the reads for each sample
-                debug!("Counting reads");
-                index_array
-                    .axis_chunks_iter(Axis(1), max_n_pf)
-                    .zip(n_pf_chunk)
-                    .for_each(|(ix_array, &n_pf)| {
-                        sample_counts
-                            .par_iter_mut()
-                            .for_each(|(sample_i, [n_reads, m_reads])| {
-                                let [lane_n, lane_m] = count_reads(
-                                    samples,
-                                    sample_i.clone(),
-                                    n_pf,
-                                    &ix_array,
-                                    &idx_slices,
-                                );
-                                *n_reads += lane_n;
-                                *m_reads += lane_m;
-                            });
-                    });
-
                 // 2. per read:
                 for (k, (read_h, read_files)) in read_headers.iter().zip(&sample_files).enumerate()
                 {
@@ -463,14 +409,14 @@ pub fn demux_fastqs(
                     read_files
                         .par_iter()
                         .enumerate()
-                        .for_each(|(sample_i, sample_filepath)| {
-                            buffer_array
+                        .map(|(sample_i, sample_filepath)| {
+                            let read_counts: Vec<_> = buffer_array
                                 .axis_chunks_iter(Axis(1), max_n_pf)
                                 .zip(index_array.axis_chunks_iter(Axis(1), max_n_pf))
                                 .zip(&locs_vecs)
                                 .zip(tid_chunk)
                                 .zip(n_pf_chunk)
-                                .for_each(|((((b_array, ix_array), locs_vec), &tid), &n_pf)| {
+                                .map(|((((b_array, ix_array), locs_vec), &tid), &n_pf)| {
                                     write_reads(
                                         novaseq_run,
                                         samples,
@@ -485,13 +431,33 @@ pub fn demux_fastqs(
                                         k + 1,
                                         compression,
                                     )
-                                });
-                        });
+                                })
+                                .collect();
+
+                            let n_reads: u64 = read_counts.iter().map(|r| r[0]).sum();
+                            let m_reads: u64 = read_counts.iter().map(|r| r[1]).sum();
+
+                            [n_reads, m_reads]
+                        })
+                        .collect_into_vec(&mut chunk_count);
+
+                    // if this is the first read, add the read counts to sample_count
+                    if k == 0 {
+                        debug!("Adding read counts");
+                        sample_counts
+                            .iter_mut()
+                            .enumerate()
+                            .for_each(|(i, sample_row)| {
+                                sample_row[0] += chunk_count[i][0];
+                                sample_row[1] += chunk_count[i][1];
+                            });
+                    }
                 }
             }
         }
     }
 
+    debug!("Writing read count report");
     write_report(&report_filepath, samples, &sample_counts);
 
     Ok(())

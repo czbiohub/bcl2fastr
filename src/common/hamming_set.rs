@@ -59,11 +59,7 @@ pub fn check_conflict(
         .collect();
 
     if index2_sets.len() == 0 {
-        if sample_clash.len() > 0 {
-            return true;
-        } else {
-            return false;
-        }
+        return sample_clash.len() > 0;
     }
 
     let sample_clash2: HashSet<_> = sample_names
@@ -80,11 +76,7 @@ pub fn check_conflict(
         })
         .collect();
 
-    if sample_clash.intersection(&sample_clash2).count() > 0 {
-        return true;
-    } else {
-        return false;
-    }
+    return sample_clash.intersection(&sample_clash2).count() > 0;
 }
 
 #[cfg(test)]
