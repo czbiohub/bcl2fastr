@@ -96,12 +96,11 @@ fn get_sample_filepaths(
 /// write the reads for a given sample to a fastq.gz file
 fn write_reads(
     novaseq_run: &NovaSeqRun,
-    samples: &Samples,
     sample_i: usize,
+    sample_id: &[Option<(usize, bool)>],
     sample_filepath: &PathBuf,
     buffer_array: &ArrayView3<u8>,
     index_array: &ArrayView3<u8>,
-    index_slices: &[[usize; 2]],
     locs_vec: &[[u32; 2]],
     tile: u32,
     lane: usize,
@@ -123,42 +122,41 @@ fn write_reads(
     // array for holding count of exact and inexact matches
     let mut read_counts = [0u64; 2];
 
-    buffer_array
-        .axis_iter(Axis(1))
-        .zip(index_array.axis_iter(Axis(1)))
-        .zip(locs_vec)
-        .for_each(|((bq_row, ix_row), loc)| {
-            let indices: Vec<_> = index_slices
-                .iter()
-                .cloned()
-                .map(|[i0, i1]| ix_row.slice(ndarray::s![i0..i1, 0]))
-                .collect();
-
-            if samples.get_sample(sample_i, &indices) {
-                if samples.is_exact(sample_i, &indices) {
-                    read_counts[0] += 1;
-                } else {
-                    read_counts[1] += 1;
-                }
-
-                write!(
-                    gz_writer,
-                    "{}:{}:{}:{}:{} {}:N:0:",
-                    novaseq_run.run_id, lane, tile, loc[0], loc[1], read_num,
-                )
-                .unwrap();
-                gz_writer
-                    .write_all(ix_row.slice(ndarray::s![.., 0]).as_slice().unwrap())
-                    .unwrap();
-                gz_writer
-                    .write_all(bq_row.slice(ndarray::s![.., 0]).as_slice().unwrap())
-                    .unwrap();
-                gz_writer.write_all(b"\n+\n").unwrap();
-                gz_writer
-                    .write_all(bq_row.slice(ndarray::s![.., 1]).as_slice().unwrap())
-                    .unwrap();
-                gz_writer.write_all(b"\n").unwrap();
+    sample_id
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &s_id)| match s_id {
+            Some((ix, is_exact)) if ix == sample_i => Some((i, is_exact)),
+            _ => None,
+        })
+        .for_each(|(i, is_exact)| {
+            if is_exact {
+                read_counts[0] += 1;
+            } else {
+                read_counts[1] += 1;
             }
+
+            let bq_row = buffer_array.index_axis(Axis(1), i);
+            let ix_row = index_array.index_axis(Axis(1), i);
+            let loc = locs_vec[i];
+
+            write!(
+                gz_writer,
+                "{}:{}:{}:{}:{} {}:N:0:",
+                novaseq_run.run_id, lane, tile, loc[0], loc[1], read_num,
+            )
+            .unwrap();
+            gz_writer
+                .write_all(ix_row.slice(ndarray::s![.., 0]).as_slice().unwrap())
+                .unwrap();
+            gz_writer
+                .write_all(bq_row.slice(ndarray::s![.., 0]).as_slice().unwrap())
+                .unwrap();
+            gz_writer.write_all(b"\n+\n").unwrap();
+            gz_writer
+                .write_all(bq_row.slice(ndarray::s![.., 1]).as_slice().unwrap())
+                .unwrap();
+            gz_writer.write_all(b"\n").unwrap();
         });
 
     read_counts
@@ -270,6 +268,10 @@ pub fn demux_fastqs(
     let mut buffer_array = Array3::zeros((n_cycles, n_tiles * max_n_pf, 2).f());
     let mut index_array = Array3::zeros((n_idx_cycles, n_tiles * max_n_pf, 2).f());
 
+    // this array will hold sample ids and exact-match bools
+    let mut sample_ids: Vec<Vec<Option<(usize, bool)>>> =
+        vec![Vec::with_capacity(max_n_pf); n_tiles];
+
     index_array
         .index_axis_mut(Axis(0), n_idx_cycles - 1)
         .fill(b'\n');
@@ -371,6 +373,30 @@ pub fn demux_fastqs(
                         });
                 }
 
+                // 1a. identify each sample from indexes
+                index_array
+                    .axis_chunks_iter(Axis(1), max_n_pf)
+                    .into_par_iter()
+                    .zip(n_pf_chunk)
+                    .zip(&mut sample_ids)
+                    .for_each(|((ix_chunk, &n_pf), id_chunk)| {
+                        let ix_array = ix_chunk.slice(ndarray::s![.., ..n_pf, 0]);
+
+                        ix_array
+                            .axis_iter(Axis(1))
+                            .into_par_iter()
+                            .map(|ix_row| {
+                                let indices: Vec<_> = idx_slices
+                                    .iter()
+                                    .cloned()
+                                    .map(|[i0, i1]| ix_row.slice(ndarray::s![i0..i1]))
+                                    .collect();
+
+                                samples.get_sample(&indices)
+                            })
+                            .collect_into_vec(id_chunk)
+                    });
+
                 // 2. per read:
                 for (k, (read_h, read_files)) in read_headers.iter().zip(&sample_files).enumerate()
                 {
@@ -416,22 +442,27 @@ pub fn demux_fastqs(
                                 .zip(&locs_vecs)
                                 .zip(tid_chunk)
                                 .zip(n_pf_chunk)
-                                .map(|((((b_array, ix_array), locs_vec), &tid), &n_pf)| {
-                                    write_reads(
-                                        novaseq_run,
-                                        samples,
-                                        sample_i,
-                                        sample_filepath,
-                                        &b_array.slice(ndarray::s![..read_h.len(), ..n_pf, ..]),
-                                        &ix_array.slice(ndarray::s![.., ..n_pf, ..]),
-                                        &idx_slices,
-                                        locs_vec,
-                                        tid,
-                                        lane,
-                                        k + 1,
-                                        compression,
-                                    )
-                                })
+                                .zip(&sample_ids)
+                                .map(
+                                    |(
+                                        ((((b_array, ix_array), locs_vec), &tid), &n_pf),
+                                        id_chunk,
+                                    )| {
+                                        write_reads(
+                                            novaseq_run,
+                                            sample_i,
+                                            id_chunk,
+                                            sample_filepath,
+                                            &b_array.slice(ndarray::s![..read_h.len(), ..n_pf, ..]),
+                                            &ix_array.slice(ndarray::s![.., ..n_pf, ..]),
+                                            locs_vec,
+                                            tid,
+                                            lane,
+                                            k + 1,
+                                            compression,
+                                        )
+                                    },
+                                )
                                 .collect();
 
                             let n_reads: u64 = read_counts.iter().map(|r| r[0]).sum();
