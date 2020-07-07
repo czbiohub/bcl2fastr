@@ -148,16 +148,14 @@ fn main() {
         Err(e) => panic!("Error reading NovaSeq run: {}", e),
     };
 
-    for (lane, sample_vec) in sample_data {
-        demux_fastqs(
-            &novaseq_run,
-            lane,
-            &sample_vec,
-            &output_path,
-            n_tiles,
-            compression,
-        )
-        .unwrap();
-    }
+    demux_fastqs(
+        &novaseq_run,
+        &sample_data,
+        &output_path,
+        n_tiles,
+        compression,
+    )
+    .unwrap();
+
     info!("Demux complete");
 }

@@ -292,14 +292,14 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = r#"Error parsing RunInfo: custom: 'missing field `Read`'"#)]
+    #[should_panic(expected = r#"Error parsing RunInfo: custom: missing field `Read`"#)]
     fn no_reads() {
         let filename_info = Path::new("test_data/bad_RunInfo_no_reads.xml");
         parse_run_info(filename_info).unwrap();
     }
 
     #[test]
-    #[should_panic(expected = r#"Error parsing RunInfo: custom: 'missing field `Tile`'"#)]
+    #[should_panic(expected = r#"Error parsing RunInfo: custom: missing field `Tile`"#)]
     fn no_tiles() {
         let filename_info = Path::new("test_data/bad_RunInfo_no_tiles.xml");
         parse_run_info(filename_info).unwrap();
