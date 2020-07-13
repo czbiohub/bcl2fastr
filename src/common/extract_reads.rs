@@ -2,7 +2,7 @@
 
 use std::{fs::File, io::prelude::*, io::SeekFrom, ptr::write};
 
-use flate2::read::MultiGzDecoder;
+use flate2::read::GzDecoder;
 use ndarray::{ArrayViewMut2, Axis};
 
 use crate::base_decoder::{B_MAP_01, B_MAP_10, Q_MAP_01, Q_MAP_10};
@@ -16,7 +16,7 @@ fn extract_tiles(
     filter: &[u8],
 ) -> std::io::Result<()> {
     let start_pos = header.start_pos[tile_i];
-    let uncompressed_size = header.uncompressed_size[tile_i];
+    let compressed_size = header.compressed_size[tile_i];
 
     // open file and seek to start position
     let mut cbcl = File::open(&header.cbcl_path)?;
@@ -26,8 +26,8 @@ fn extract_tiles(
     let mut read_slice = bq_cycle.slice_mut(ndarray::s![.., 0]).as_mut_ptr();
     let mut qscore_slice = bq_cycle.slice_mut(ndarray::s![.., 1]).as_mut_ptr();
 
-    // use MultiGzDecoder to decompress
-    let gz = MultiGzDecoder::new(&cbcl).take(uncompressed_size);
+    // use GzDecoder to decompress
+    let gz = GzDecoder::new(cbcl.take(compressed_size));
     for (byte, f) in gz.bytes().zip(filter) {
         let c = match byte {
             Ok(c) => c as usize,
