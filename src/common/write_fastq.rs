@@ -51,7 +51,7 @@ fn make_report_filename(output_path: &PathBuf, lane: usize) -> PathBuf {
     }
 }
 
-/// remove any existing output files
+/// formats all the output filepaths, and removes any existing version
 fn get_sample_filepaths(
     novaseq_run: &NovaSeqRun,
     samples: &Samples,
@@ -93,6 +93,7 @@ fn get_sample_filepaths(
     Ok(sample_filepaths)
 }
 
+/// open an output file for writing (creates or appends)
 fn get_gz_writer(sample_filepath: &PathBuf, compression: u32) -> GzEncoder<File> {
     // create gz writer for this sample, or open for appending
     let out_file = match OpenOptions::new()
@@ -104,7 +105,6 @@ fn get_gz_writer(sample_filepath: &PathBuf, compression: u32) -> GzEncoder<File>
         Err(e) => panic!("Error creating file: {}", e),
     };
 
-    debug!("Creating writer for {}", sample_filepath.display());
     GzEncoder::new(out_file, flate2::Compression::new(compression))
 }
 
