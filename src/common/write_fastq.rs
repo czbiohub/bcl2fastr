@@ -202,6 +202,18 @@ pub fn demux_fastqs(
         Ok(sample_fs) => sample_fs,
         Err(e) => panic!("Couldn't clear existing files: {}", e),
     };
+
+    // create all the writers up front to avoid writing multiple headers
+    let mut sample_writers: Vec<_> = sample_files
+        .iter()
+        .map(|sample_fs| {
+            sample_fs
+                .iter()
+                .map(|sample_filepath| get_gz_writer(sample_filepath, compression))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
     // two columns, for exact and inexact matches
     let mut sample_counts = vec![[0u64; 2]; samples.sample_names.len()];
     // a temporary vector to hold count info while processing
@@ -216,10 +228,9 @@ pub fn demux_fastqs(
 
     // if split-lanes is true, we will get a single lane number. Otherwise, lane_n is 0
     // and we should process all the lanes
-    let lane_iter = if lane_n == 0 {
-        1..=novaseq_run.run_info.flowcell_layout.lane_count
-    } else {
-        lane_n..=lane_n
+    let lane_iter = match lane_n {
+        0 => 1..=novaseq_run.run_info.flowcell_layout.lane_count,
+        _ => lane_n..=lane_n,
     };
 
     // compute max array depth needed for data
@@ -400,7 +411,10 @@ pub fn demux_fastqs(
                     });
 
                 // 2. per read:
-                for (k, (read_h, read_files)) in read_headers.iter().zip(&sample_files).enumerate()
+                for (k, (read_h, gz_writers)) in read_headers
+                    .iter()
+                    .zip(sample_writers.iter_mut())
+                    .enumerate()
                 {
                     debug!("reading data for read {}", k + 1);
                     // 3. par_iter over cycles and read the data in
@@ -434,13 +448,10 @@ pub fn demux_fastqs(
                     // 4. par_iter the reads into files.
                     // It's possible/likely that n_samples >> n_threads, but they will block
                     // on i/o and so this should maximize CPU usage (maybe)
-                    read_files
-                        .par_iter()
+                    gz_writers
+                        .par_iter_mut()
                         .enumerate()
-                        .map(|(sample_i, sample_filepath)| {
-                            // open the file writing only once per sample
-                            let mut gz_writer = get_gz_writer(sample_filepath, compression);
-
+                        .map(|(sample_i, gz_writer)| {
                             let read_counts: Vec<_> = buffer_array
                                 .axis_chunks_iter(Axis(1), max_n_pf)
                                 .zip(index_array.axis_chunks_iter(Axis(1), max_n_pf))
@@ -455,7 +466,7 @@ pub fn demux_fastqs(
                                     )| {
                                         write_reads(
                                             novaseq_run,
-                                            &mut gz_writer,
+                                            gz_writer,
                                             sample_i,
                                             &id_chunk[..n_pf],
                                             &b_array.slice(ndarray::s![..read_h.len(), ..n_pf, ..]),
