@@ -129,7 +129,7 @@ impl NovaSeqRun {
                 lane_surface_filters
                     .par_iter()
                     .map(|filter| {
-                        let n_pf: usize = filter.iter().map(|&b| [0, 1, 1, 2][b as usize]).sum();
+                        let n_pf = filter.iter().map(|b| b.count_ones()).sum::<u32>() as usize;
 
                         let mut pf_filter: Vec<_> = std::iter::repeat(3).take(n_pf / 2).collect();
                         if n_pf % 2 == 1 {

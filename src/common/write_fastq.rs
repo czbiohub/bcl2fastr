@@ -93,20 +93,7 @@ fn get_sample_filepaths(
     Ok(sample_filepaths)
 }
 
-/// write the reads for a given sample to a fastq.gz file
-fn write_reads(
-    novaseq_run: &NovaSeqRun,
-    sample_i: usize,
-    sample_id: &[Option<(usize, bool)>],
-    sample_filepath: &PathBuf,
-    buffer_array: &ArrayView3<u8>,
-    index_array: &ArrayView3<u8>,
-    locs_vec: &[[u32; 2]],
-    tile: u32,
-    lane: usize,
-    read_num: usize,
-    compression: u32,
-) -> [u64; 2] {
+fn get_gz_writer(sample_filepath: &PathBuf, compression: u32) -> GzEncoder<File> {
     // create gz writer for this sample, or open for appending
     let out_file = match OpenOptions::new()
         .create(true)
@@ -117,8 +104,23 @@ fn write_reads(
         Err(e) => panic!("Error creating file: {}", e),
     };
 
-    let mut gz_writer = GzEncoder::new(out_file, flate2::Compression::new(compression));
+    debug!("Creating writer for {}", sample_filepath.display());
+    GzEncoder::new(out_file, flate2::Compression::new(compression))
+}
 
+/// write the reads for a given sample to a fastq.gz file
+fn write_reads(
+    novaseq_run: &NovaSeqRun,
+    gz_writer: &mut GzEncoder<File>,
+    sample_i: usize,
+    sample_id: &[Option<(usize, bool)>],
+    buffer_array: &ArrayView3<u8>,
+    index_array: &ArrayView3<u8>,
+    locs_vec: &[[u32; 2]],
+    tile: u32,
+    lane: usize,
+    read_num: usize,
+) -> [u64; 2] {
     // array for holding count of exact and inexact matches
     let mut read_counts = [0u64; 2];
 
@@ -436,6 +438,9 @@ pub fn demux_fastqs(
                         .par_iter()
                         .enumerate()
                         .map(|(sample_i, sample_filepath)| {
+                            // open the file writing only once per sample
+                            let mut gz_writer = get_gz_writer(sample_filepath, compression);
+
                             let read_counts: Vec<_> = buffer_array
                                 .axis_chunks_iter(Axis(1), max_n_pf)
                                 .zip(index_array.axis_chunks_iter(Axis(1), max_n_pf))
@@ -450,16 +455,15 @@ pub fn demux_fastqs(
                                     )| {
                                         write_reads(
                                             novaseq_run,
+                                            &mut gz_writer,
                                             sample_i,
-                                            id_chunk,
-                                            sample_filepath,
+                                            &id_chunk[..n_pf],
                                             &b_array.slice(ndarray::s![..read_h.len(), ..n_pf, ..]),
                                             &ix_array.slice(ndarray::s![.., ..n_pf, ..]),
                                             locs_vec,
                                             tid,
                                             lane,
                                             k + 1,
-                                            compression,
                                         )
                                     },
                                 )
