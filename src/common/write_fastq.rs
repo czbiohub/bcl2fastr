@@ -95,10 +95,10 @@ fn get_sample_filepaths(
 
 /// open an output file for writing (creates or appends)
 fn get_gz_writer(sample_filepath: &PathBuf, compression: u32) -> GzEncoder<File> {
-    // create gz writer for this sample, or open for appending
+    // create gz writer for this sample. will overwrite existing file
     let out_file = match OpenOptions::new()
         .create(true)
-        .append(true)
+        .write(true)
         .open(sample_filepath)
     {
         Ok(out_file) => out_file,

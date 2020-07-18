@@ -41,18 +41,6 @@ impl Samples {
         }
     }
 
-    /// Check if the indices are exact matches
-    pub fn is_exact(&self, i: usize, indices: &[ArrayView1<u8>]) -> bool {
-        match indices.len() {
-            1 => self.index_vec[i] == indices[0].as_slice().unwrap(),
-            2 => {
-                self.index_vec[i] == indices[0].as_slice().unwrap()
-                    && self.index2_vec[i] == indices[1].as_slice().unwrap()
-            }
-            x => panic!("Got {} indices?!", x),
-        }
-    }
-
     /// Checks if the indices match any of the samples
     pub fn is_any_sample(&self, indices: &[Vec<u8>]) -> bool {
         match indices.len() {
@@ -165,12 +153,15 @@ fn make_sample_maps(
         .enumerate()
         .flat_map(|(i, idx_set)| idx_set.iter().cloned().map(move |ix| (ix, i.clone())))
         .collect();
+    println!("index_map {:?}", index_map);
 
     let index2_map = index2_hash_sets
         .iter()
         .enumerate()
         .flat_map(|(i, idx_set)| idx_set.iter().cloned().map(move |ix| (ix, i.clone())))
         .collect();
+
+    println!("index2_map {:?}", index_map);
 
     Samples {
         sample_names: sample_names.to_vec(),
@@ -478,32 +469,6 @@ mod tests {
     }
 
     #[test]
-    fn sample_check() {
-        let samplesheet = PathBuf::from(ROOT).join("no_conflict_w_index2.csv");
-        let sampledata = read_samplesheet(samplesheet, 1).unwrap();
-        let lane = &sampledata.get(&0).unwrap();
-
-        let idx1 = array![71, 71, 71, 71, 71];
-        let idx2 = array![65, 65, 65, 65, 65];
-        let idx1a = array![71, 71, 71, 71, 65];
-        let idx2g = array![65, 65, 65, 65, 71];
-
-        // exact lookup, one index
-        assert!(lane.is_exact(0, &[idx1.view()]));
-
-        // exact lookup, two indices
-        assert!(lane.is_exact(0, &[idx1.view(), idx2.view()]));
-
-        // not exact lookup single index
-        assert!(!lane.is_exact(0, &[idx1a.view()]));
-
-        // not exact index, two indices
-        assert!(!lane.is_exact(0, &[idx1.view(), idx2g.view()]));
-        assert!(!lane.is_exact(0, &[idx1a.view(), idx2.view()]));
-        assert!(!lane.is_exact(0, &[idx1a.view(), idx2g.view()]));
-    }
-
-    #[test]
     fn any_sample_check() {
         let samplesheet = PathBuf::from(ROOT).join("no_conflict_w_index2.csv");
         let sampledata = read_samplesheet(samplesheet, 1).unwrap();
@@ -653,23 +618,6 @@ mod tests {
             array![65, 65].view(),
             array![65, 65].view(),
         ]);
-    }
-
-    #[test]
-    #[should_panic(expected = r#"Got 3 indices?!"#)]
-    fn weird_sample_check() {
-        let samplesheet = PathBuf::from(ROOT).join("no_conflict_w_index2.csv");
-        let sampledata = read_samplesheet(samplesheet, 1).unwrap();
-        let lane = &sampledata.get(&0).unwrap();
-
-        lane.is_exact(
-            0,
-            &[
-                array![71, 84].view(),
-                array![65, 65].view(),
-                array![65, 65].view(),
-            ],
-        );
     }
 
     #[test]
