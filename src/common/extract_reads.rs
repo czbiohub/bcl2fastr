@@ -3,6 +3,7 @@
 use std::{fs::File, io::prelude::*, io::SeekFrom, ptr::write};
 
 use flate2::read::GzDecoder;
+use log::debug;
 use ndarray::{ArrayViewMut2, Axis};
 
 use crate::base_decoder::{B_MAP_01, B_MAP_10, Q_MAP_01, Q_MAP_10};
@@ -70,11 +71,18 @@ pub fn extract_cbcl(
     bq_cycle: &mut ArrayViewMut2<u8>,
     tile_i: usize,
 ) {
-    if let Ok(_) = extract_tiles(header, tile_i, bq_cycle, filter) {
-        return;
-    } else {
-        bq_cycle.index_axis_mut(Axis(1), 0).fill(b'N');
-        bq_cycle.index_axis_mut(Axis(1), 1).fill(b'#');
+    match extract_tiles(header, tile_i, bq_cycle, filter) {
+        Ok(_) => return,
+        Err(e) => {
+            debug!(
+                "Encountered error in tile {} of {}",
+                tile_i,
+                header.cbcl_path.display(),
+            );
+            debug!("{}", e);
+            bq_cycle.index_axis_mut(Axis(1), 0).fill(b'N');
+            bq_cycle.index_axis_mut(Axis(1), 1).fill(b'#');
+        }
     }
 }
 
