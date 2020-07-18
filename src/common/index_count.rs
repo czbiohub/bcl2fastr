@@ -1,6 +1,6 @@
 //! Extract only the indexes from a run and count them
 
-use std::{fs::File, io::prelude::*, path::PathBuf};
+use std::{cmp::Ordering, fs::File, io::prelude::*, path::PathBuf};
 
 use counter::Counter;
 use rayon::prelude::*;
@@ -68,6 +68,7 @@ pub fn index_count(
     novaseq_run: &NovaSeqRun,
     output_path: PathBuf,
     top_n_counts: usize,
+    k_fold: usize,
 ) -> Result<(), &'static str> {
     info!("writing to {}", output_path.display());
     let mut out_file = match File::create(output_path) {
@@ -75,8 +76,8 @@ pub fn index_count(
         Err(e) => panic!("Error creating file: {}", e),
     };
 
-    let top_8n_counts = top_n_counts * 8;
-    let mut counts: Counter<Vec<u8>> = Counter::new();
+    let top_kn_counts = top_n_counts * k_fold;
+    let mut counters = Vec::new();
 
     info!("Counting indexes");
     for lane in 1..=novaseq_run.run_info.flowcell_layout.lane_count {
@@ -95,28 +96,39 @@ pub fn index_count(
                 .zip(n_pfs)
                 .enumerate()
                 .map(|(i, ((filter, pf_filter), &n_pf))| {
-                    count_tile_chunk(i, idx_headers, filter, pf_filter, n_pf, top_8n_counts)
+                    count_tile_chunk(i, idx_headers, filter, pf_filter, n_pf, top_kn_counts)
                 })
                 .reduce(Counter::new, |a, b| a + b);
 
             debug!("Done with {} - {}, adding to counts", lane, surface);
-            counts += this_count;
+            counters.push(this_count);
         }
         debug!("Lane {} complete", lane);
     }
 
-    debug!("Writing counts");
-    for (elem, freq) in counts.most_common_ordered().iter().take(top_n_counts) {
+    debug!("Merging counts");
+    let counts = counters
+        .par_iter()
+        .cloned()
+        .reduce(Counter::new, |a, b| a + b);
+
+    debug!("Sorting");
+    let mut count_vec: Vec<_> = counts.iter().collect();
+    count_vec.par_sort_by(|(e1, f1), (e2, f2)| match f2.cmp(f1) {
+        Ordering::Equal => e1.cmp(e2),
+        unequal => unequal,
+    });
+
+    debug!("Writing");
+    for (elem, freq) in count_vec.iter().take(top_n_counts) {
         writeln!(
             &mut out_file,
             "{}\t{}",
-            unsafe { String::from_utf8_unchecked(elem.to_vec()) },
+            String::from_utf8(elem.to_vec()).unwrap(),
             freq
         )
         .unwrap();
     }
-
-    out_file.flush().unwrap();
 
     Ok(())
 }
@@ -132,7 +144,7 @@ mod tests {
         let output_path = PathBuf::from("test_data/test_output/index_counts.txt");
         let novaseq_run = NovaSeqRun::read_path(run_path, true).unwrap();
 
-        super::index_count(&novaseq_run, output_path, 384).unwrap()
+        super::index_count(&novaseq_run, output_path, 384, 4).unwrap()
     }
 
     #[test]
@@ -142,6 +154,6 @@ mod tests {
         let output_path = PathBuf::from("test_data/wrong_test_output/index_counts.txt");
         let novaseq_run = NovaSeqRun::read_path(run_path, true).unwrap();
 
-        super::index_count(&novaseq_run, output_path, 384).unwrap()
+        super::index_count(&novaseq_run, output_path, 384, 4).unwrap()
     }
 }

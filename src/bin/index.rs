@@ -45,6 +45,14 @@ fn main() {
                 .takes_value(true),
         )
         .arg(
+            Arg::with_name("k-fold")
+                .long("k-fold")
+                .short("k")
+                .help("expand top-n by k inside threads")
+                .default_value("4")
+                .takes_value(true),
+        )
+        .arg(
             Arg::with_name("verbosity")
                 .short("v")
                 .multiple(true)
@@ -105,6 +113,7 @@ fn main() {
 
     let threads = value_t!(matches, "threads", usize).unwrap_or_else(|e| e.exit());
     let top_n = value_t!(matches, "top-n", usize).unwrap_or_else(|e| e.exit());
+    let k_fold = value_t!(matches, "k-fold", usize).unwrap_or_else(|e| e.exit());
 
     ThreadPoolBuilder::new()
         .num_threads(threads)
@@ -118,6 +127,6 @@ fn main() {
 
     info!("Finished loading novaseq run");
     info!("Counting indexes");
-    index_count(&novaseq_run, output_path, top_n).unwrap();
+    index_count(&novaseq_run, output_path, top_n, k_fold).unwrap();
     info!("Done");
 }
