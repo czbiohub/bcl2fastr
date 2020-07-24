@@ -38,18 +38,17 @@ fn main() {
                 .takes_value(true),
         )
         .arg(
+            Arg::with_name("read-chunks")
+                .long("read-chunks")
+                .help("number of tiles to process at once while reading")
+                .default_value("39")
+                .takes_value(true),
+        )
+        .arg(
             Arg::with_name("top-n")
                 .long("top-n")
                 .help("return the top N index counts")
                 .default_value("384")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("k-fold")
-                .long("k-fold")
-                .short("k")
-                .help("expand top-n by k inside threads")
-                .default_value("4")
                 .takes_value(true),
         )
         .arg(
@@ -112,8 +111,8 @@ fn main() {
     }
 
     let threads = value_t!(matches, "threads", usize).unwrap_or_else(|e| e.exit());
+    let n_tiles = value_t!(matches, "read-chunks", usize).unwrap_or_else(|e| e.exit());
     let top_n = value_t!(matches, "top-n", usize).unwrap_or_else(|e| e.exit());
-    let k_fold = value_t!(matches, "k-fold", usize).unwrap_or_else(|e| e.exit());
 
     ThreadPoolBuilder::new()
         .num_threads(threads)
@@ -127,6 +126,6 @@ fn main() {
 
     info!("Finished loading novaseq run");
     info!("Counting indexes");
-    index_count(&novaseq_run, output_path, top_n, k_fold).unwrap();
+    index_count(&novaseq_run, output_path, top_n, n_tiles).unwrap();
     info!("Done");
 }

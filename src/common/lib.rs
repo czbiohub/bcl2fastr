@@ -11,3 +11,8 @@ pub mod sample_data;
 
 pub mod index_count;
 pub mod write_fastq;
+
+use jemallocator::Jemalloc;
+
+#[global_allocator]
+static ALLOC: Jemalloc = Jemalloc;

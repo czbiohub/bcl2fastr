@@ -7,68 +7,17 @@ use rayon::prelude::*;
 
 use ndarray::{Array3, Axis, ShapeBuilder};
 
-use crate::cbcl_header_decoder::CBCLHeader;
 use crate::extract_reads::extract_cbcl;
 use crate::novaseq_run::NovaSeqRun;
 
 use log::{debug, info};
-
-fn count_tile_chunk(
-    tile_i: usize,
-    headers: &[Vec<CBCLHeader>],
-    filter: &[u8],
-    pf_filter: &[u8],
-    n_pf: usize,
-    n_counts: usize,
-) -> Counter<Vec<u8>> {
-    let n_idx_cycles: usize = headers.iter().map(|h| h.len()).sum();
-
-    let mut index_array = Array3::zeros((n_idx_cycles + headers.len() - 1, n_pf, 2).f());
-    if headers.len() == 2 {
-        index_array
-            .index_axis_mut(Axis(0), headers[0].len())
-            .fill(b'+');
-    }
-
-    let mut j = 0;
-    for idx_vec in headers {
-        let mut idx_array = index_array.slice_mut(ndarray::s![j..j + idx_vec.len(), ..n_pf, ..]);
-        j += idx_vec.len() + 1;
-
-        for (mut byte_array, idx_h) in idx_array.axis_iter_mut(Axis(0)).zip(idx_vec) {
-            extract_cbcl(
-                idx_h,
-                if idx_h.non_pf_clusters_excluded {
-                    &pf_filter
-                } else {
-                    &filter
-                },
-                &mut byte_array.slice_mut(ndarray::s![..n_pf, ..]),
-                tile_i,
-            )
-        }
-    }
-
-    let this_count: Counter<Vec<u8>> = index_array
-        .index_axis(Axis(2), 0)
-        .axis_iter(Axis(1))
-        .map(|ix| ix.to_vec())
-        .collect();
-
-    this_count
-        .most_common()
-        .iter()
-        .take(n_counts)
-        .cloned()
-        .collect()
-}
 
 /// Iterate through all lanes and surfaces and count indexes
 pub fn index_count(
     novaseq_run: &NovaSeqRun,
     output_path: PathBuf,
     top_n_counts: usize,
-    k_fold: usize,
+    n_tiles: usize,
 ) -> Result<(), &'static str> {
     info!("writing to {}", output_path.display());
     let mut out_file = match File::create(output_path) {
@@ -76,32 +25,118 @@ pub fn index_count(
         Err(e) => panic!("Error creating file: {}", e),
     };
 
-    let top_kn_counts = top_n_counts * k_fold;
+    let idx_reads: Vec<_> = novaseq_run
+        .run_info
+        .reads
+        .iter()
+        .filter(|r| r.is_indexed_read)
+        .collect();
+
+    // slices into the index array, including padding for extra characters needed for output
+    let idx_slices: Vec<_> = idx_reads
+        .iter()
+        .scan(0, |k, r| {
+            let t = [*k, *k + r.num_cycles];
+            *k += r.num_cycles + 1;
+            Some(t)
+        })
+        .collect();
+
+    // leave space between index cycles for '+'
+    let n_idx_cycles = idx_reads.len() + idx_reads.iter().map(|r| r.num_cycles).sum::<usize>() - 1;
+
+    // find the highest numbers of reads among the chunks of tiles
+    let max_n_pf = novaseq_run.n_pfs.values().flatten().cloned().max().unwrap();
+
+    debug!("max_n_pf: {}", max_n_pf);
+
+    // create an array that can hold all of the indexes for a chunk of tiles
+    let mut index_array = Array3::zeros((n_idx_cycles, n_tiles * max_n_pf, 2).f());
+
+    // fill the row between index reads with '+' for output
+    if idx_reads.len() == 2 {
+        index_array
+            .index_axis_mut(Axis(0), idx_reads[0].num_cycles)
+            .fill(b'+');
+    }
+
     let mut counters = Vec::new();
 
     info!("Counting indexes");
     for lane in 1..=novaseq_run.run_info.flowcell_layout.lane_count {
-        debug!("Starting lane {}", lane);
         for surface in novaseq_run.run_info.flowcell_layout.surface_range.clone() {
-            debug!("Starting surface {}", surface);
+            debug!("Counting indexes for lane {} surface {}", lane, surface);
 
+            let idx_headers = novaseq_run.index_headers.get(&[lane, surface]).unwrap();
             let filters = novaseq_run.filters.get(&[lane, surface]).unwrap();
             let pf_filters = novaseq_run.pf_filters.get(&[lane, surface]).unwrap();
-            let idx_headers = novaseq_run.index_headers.get(&[lane, surface]).unwrap();
             let n_pfs = novaseq_run.n_pfs.get(&[lane, surface]).unwrap();
 
-            let this_count: Counter<Vec<u8>> = filters
-                .par_iter()
-                .zip(pf_filters)
-                .zip(n_pfs)
+            // n_tiles defines how many tiles we extract at a time. We read across all cycles
+            for (i, ((f_chunk, pff_chunk), n_pf_chunk)) in filters
+                .chunks(n_tiles)
+                .zip(pf_filters.chunks(n_tiles))
+                .zip(n_pfs.chunks(n_tiles))
                 .enumerate()
-                .map(|(i, ((filter, pf_filter), &n_pf))| {
-                    count_tile_chunk(i, idx_headers, filter, pf_filter, n_pf, top_kn_counts)
-                })
-                .reduce(Counter::new, |a, b| a + b);
+            {
+                debug!("Read chunk {}", i);
 
-            debug!("Done with {} - {}, adding to counts", lane, surface);
-            counters.push(this_count);
+                // 1. par_iter over rows/index cycles
+                // 2. count the indexes and store the counter
+
+                // beginning of this chunk
+                let chunk_i = i * n_tiles;
+
+                debug!("Reading indices");
+                // 1. chunk_mut the array and par_iter the indexes into it by cycle
+                for (idx_vec, [idx_0, idx_1]) in idx_headers.iter().zip(idx_slices.iter().cloned())
+                {
+                    let mut idx_array = index_array.slice_mut(ndarray::s![idx_0..idx_1, .., ..]);
+
+                    // outer loop is by cycle, to spread out file IO
+                    idx_array
+                        .axis_iter_mut(Axis(0))
+                        .into_par_iter()
+                        .zip(idx_vec)
+                        .for_each(|(mut cycle_array, idx_h)| {
+                            // inner loop is by tile (axis 1 in full ndarray)
+                            cycle_array
+                                .axis_chunks_iter_mut(Axis(0), max_n_pf)
+                                .zip(f_chunk)
+                                .zip(pff_chunk)
+                                .zip(n_pf_chunk)
+                                .enumerate()
+                                .for_each(|(k, (((mut byte_array, filter), pf_filter), &n_pf))| {
+                                    extract_cbcl(
+                                        idx_h,
+                                        if idx_h.non_pf_clusters_excluded {
+                                            &pf_filter
+                                        } else {
+                                            &filter
+                                        },
+                                        &mut byte_array.slice_mut(ndarray::s![..n_pf, ..]),
+                                        chunk_i + k,
+                                    );
+                                })
+                        });
+                }
+
+                let this_count: Counter<Vec<u8>> = index_array
+                    .axis_chunks_iter(Axis(1), max_n_pf)
+                    .into_par_iter()
+                    .zip(n_pf_chunk)
+                    .map(|(ix_chunk, &n_pf)| {
+                        ix_chunk
+                            .slice(ndarray::s![.., ..n_pf, 0])
+                            .axis_iter(Axis(1))
+                            .map(|ix_row| ix_row.to_vec())
+                            .collect::<Counter<Vec<u8>>>()
+                    })
+                    .reduce(Counter::new, |a, b| a + b);
+
+                debug!("Done with {} - {}, adding to counts", lane, surface);
+                counters.push(this_count);
+            }
         }
         debug!("Lane {} complete", lane);
     }
@@ -144,7 +179,7 @@ mod tests {
         let output_path = PathBuf::from("test_data/test_output/index_counts.txt");
         let novaseq_run = NovaSeqRun::read_path(run_path, true).unwrap();
 
-        super::index_count(&novaseq_run, output_path, 384, 4).unwrap()
+        super::index_count(&novaseq_run, output_path, 384, 2).unwrap()
     }
 
     #[test]
@@ -154,6 +189,6 @@ mod tests {
         let output_path = PathBuf::from("test_data/wrong_test_output/index_counts.txt");
         let novaseq_run = NovaSeqRun::read_path(run_path, true).unwrap();
 
-        super::index_count(&novaseq_run, output_path, 384, 4).unwrap()
+        super::index_count(&novaseq_run, output_path, 384, 2).unwrap()
     }
 }

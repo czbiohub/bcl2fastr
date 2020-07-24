@@ -359,19 +359,20 @@ pub fn demux_fastqs(
                 {
                     let mut idx_array = index_array.slice_mut(ndarray::s![idx_0..idx_1, .., ..]);
 
+                    // outer loop is by cycle, to spread out file io
                     idx_array
-                        .axis_chunks_iter_mut(Axis(1), max_n_pf)
+                        .axis_iter_mut(Axis(0))
                         .into_par_iter()
-                        .zip(f_chunk)
-                        .zip(pff_chunk)
-                        .zip(n_pf_chunk)
-                        .enumerate()
-                        .for_each(|(k, (((mut ix_array, filter), pf_filter), &n_pf))| {
-                            ix_array
-                                .axis_iter_mut(Axis(0))
-                                .into_par_iter()
-                                .zip(idx_vec)
-                                .for_each(|(mut byte_array, idx_h)| {
+                        .zip(idx_vec)
+                        .for_each(|(mut cycle_array, idx_h)| {
+                            // inner loop is by tile (axis 1 in full ndarray)
+                            cycle_array
+                                .axis_chunks_iter_mut(Axis(0), max_n_pf)
+                                .zip(f_chunk)
+                                .zip(pff_chunk)
+                                .zip(n_pf_chunk)
+                                .enumerate()
+                                .for_each(|(k, (((mut byte_array, filter), pf_filter), &n_pf))| {
                                     extract_cbcl(
                                         idx_h,
                                         if idx_h.non_pf_clusters_excluded {
@@ -382,7 +383,7 @@ pub fn demux_fastqs(
                                         &mut byte_array.slice_mut(ndarray::s![..n_pf, ..]),
                                         chunk_i + k,
                                     );
-                                });
+                                })
                         });
                 }
 
@@ -419,18 +420,17 @@ pub fn demux_fastqs(
                     debug!("reading data for read {}", k + 1);
                     // 3. par_iter over cycles and read the data in
                     buffer_array
-                        .axis_chunks_iter_mut(Axis(1), max_n_pf)
+                        .axis_iter_mut(Axis(0))
                         .into_par_iter()
-                        .zip(f_chunk)
-                        .zip(pff_chunk)
-                        .zip(n_pf_chunk)
-                        .enumerate()
-                        .for_each(|(j, (((mut b_array, filter), pf_filter), &n_pf))| {
-                            b_array
-                                .axis_iter_mut(Axis(0))
-                                .into_par_iter()
-                                .zip(read_h)
-                                .for_each(|(mut byte_array, header)| {
+                        .zip(read_h)
+                        .for_each(|(mut cycle_array, header)| {
+                            cycle_array
+                                .axis_chunks_iter_mut(Axis(0), max_n_pf)
+                                .zip(f_chunk)
+                                .zip(pff_chunk)
+                                .zip(n_pf_chunk)
+                                .enumerate()
+                                .for_each(|(j, (((mut byte_array, filter), pf_filter), &n_pf))| {
                                     extract_cbcl(
                                         header,
                                         if header.non_pf_clusters_excluded {

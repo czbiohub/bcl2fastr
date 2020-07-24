@@ -16,19 +16,18 @@ use crate::hamming_set::{check_conflict, hamming_set, singleton_set};
 /// processed together
 pub type SampleData = HashMap<usize, Samples>;
 
-/// The Samples struct has one or two maps that go from potential indices to sample
-/// and corrected index strings. To save space and for speed, we save the original
-/// data as a vector and use integers everywhere else
+/// The Samples struct has one or two maps that go from potential indices to sample indices.
+/// To save space, we save the original names as a vector and use integers everywhere else.
 ///
-/// If there is only one index, index2 will contain a single empty string.
+/// If there is only one index, the index2 values will be empty.
 #[derive(Debug, PartialEq)]
 pub struct Samples {
     pub sample_names: Vec<String>,
     pub project_names: Vec<Option<String>>,
     index_vec: Vec<Vec<u8>>,
-    index_map: HashMap<Vec<u8>, usize>,
+    index_map: HashMap<Vec<u8>, HashSet<usize>>,
     index2_vec: Vec<Vec<u8>>,
-    index2_map: HashMap<Vec<u8>, usize>,
+    index2_map: HashMap<Vec<u8>, HashSet<usize>>,
 }
 
 impl Samples {
@@ -50,7 +49,7 @@ impl Samples {
                     self.index_map.get(&indices[0]),
                     self.index2_map.get(&indices[1]),
                 ) {
-                    (Some(ix), Some(ix2)) if ix == ix2 => true,
+                    (Some(ix_set), Some(ix2_set)) if !ix_set.is_disjoint(&ix2_set) => true,
                     _ => false,
                 }
             }
@@ -58,15 +57,18 @@ impl Samples {
         }
     }
 
-    /// helper function for when there is one index
+    /// helper function for when there is one index. By construction every set will contain
+    /// only a single usize element
     fn get_1index_sample(&self, idx: ArrayView1<u8>) -> Option<(usize, bool)> {
-        if let Some(&ix) = self.index_map.get(idx.as_slice().unwrap()) {
-            return Some((ix.clone(), self.index_vec[ix] == idx.as_slice().unwrap()));
+        if let Some(ix_set) = self.index_map.get(idx.as_slice().unwrap()) {
+            let ix = ix_set.iter().nth(0).unwrap().clone();
+            return Some((ix, self.index_vec[ix] == idx.as_slice().unwrap()));
         };
         return None;
     }
 
-    /// helper function for when there are two indices
+    /// helper function for when there are two indices. By construction any intersection will
+    /// either be empty or contain one usize element
     fn get_2index_sample(
         &self,
         idx: ArrayView1<u8>,
@@ -76,7 +78,8 @@ impl Samples {
             self.index_map.get(idx.as_slice().unwrap()),
             self.index2_map.get(idx2.as_slice().unwrap()),
         ) {
-            (Some(&ix), Some(&ix2)) if ix == ix2 => {
+            (Some(ix_set), Some(ix2_set)) if !ix_set.is_disjoint(ix2_set) => {
+                let ix = ix_set.intersection(ix2_set).nth(0).unwrap().clone();
                 let is_exact = self.index_vec[ix] == idx.as_slice().unwrap()
                     && self.index2_vec[ix] == idx2.as_slice().unwrap();
 
@@ -148,20 +151,19 @@ fn make_sample_maps(
         index2_hash_sets = new_index2_hash_sets;
     }
 
-    let index_map = index_hash_sets
-        .iter()
-        .enumerate()
-        .flat_map(|(i, idx_set)| idx_set.iter().cloned().map(move |ix| (ix, i.clone())))
-        .collect();
-    println!("index_map {:?}", index_map);
+    let mut index_map = HashMap::new();
+    for (i, idx_set) in index_hash_sets.iter().enumerate() {
+        for ix in idx_set.iter().cloned() {
+            index_map.entry(ix).or_insert(HashSet::new()).insert(i);
+        }
+    }
 
-    let index2_map = index2_hash_sets
-        .iter()
-        .enumerate()
-        .flat_map(|(i, idx_set)| idx_set.iter().cloned().map(move |ix| (ix, i.clone())))
-        .collect();
-
-    println!("index2_map {:?}", index_map);
+    let mut index2_map = HashMap::new();
+    for (i, idx2_set) in index2_hash_sets.iter().enumerate() {
+        for ix2 in idx2_set.iter().cloned() {
+            index2_map.entry(ix2).or_insert(HashSet::new()).insert(i);
+        }
+    }
 
     Samples {
         sample_names: sample_names.to_vec(),
@@ -268,9 +270,11 @@ mod tests {
 
         let test_contents = fs::read_to_string("test_data/hamming_distance_1_test.txt").unwrap();
 
+        let set0: HashSet<usize> = [0].iter().cloned().collect();
+
         let expected_lane1_index: HashMap<_, _> = test_contents
             .split_whitespace()
-            .map(|ix| (ix.as_bytes().to_vec(), 0))
+            .map(|ix| (ix.as_bytes().to_vec(), set0.clone()))
             .collect();
 
         let expected_lane1 = Samples {
@@ -286,7 +290,7 @@ mod tests {
 
         let expected_lane2_index: HashMap<_, _> = test_contents
             .split_whitespace()
-            .map(|ix| (ix.as_bytes().to_vec(), 0))
+            .map(|ix| (ix.as_bytes().to_vec(), set0.clone()))
             .collect();
 
         let expected_lane2 = Samples {
@@ -318,13 +322,13 @@ mod tests {
             .iter()
             .cloned()
             .enumerate()
-            .map(|(i, ix)| (ix, i))
+            .map(|(i, ix)| (ix, [i].iter().cloned().collect::<HashSet<_>>()))
             .collect();
         let expected_index2: HashMap<_, _> = index2
             .iter()
             .cloned()
             .enumerate()
-            .map(|(i, ix)| (ix, i))
+            .map(|(i, ix)| (ix, [i].iter().cloned().collect()))
             .collect();
 
         let lane_map = sampledata.get(&1).unwrap();
@@ -338,13 +342,15 @@ mod tests {
         let samplesheet = PathBuf::from(ROOT).join("w_conflict_in_separate_lanes_w_index2.csv");
         let sampledata = read_samplesheet(samplesheet, 1).unwrap();
 
+        let set0: HashSet<usize> = [0].iter().cloned().collect();
+
         let expected_index: HashMap<_, _> = vec![
             "CCTCT", "CGCCT", "CCCCT", "CCCCA", "CCACT", "CNCCT", "GCCCT", "CCGCT", "ACCCT",
             "TCCCT", "CTCCT", "CCCGT", "NCCCT", "CCNCT", "CCCTT", "CCCCG", "CACCT", "CCCCN",
             "CCCNT", "CCCCC", "CCCAT",
         ]
         .iter()
-        .map(|i| (i.as_bytes().to_vec(), 0))
+        .map(|i| (i.as_bytes().to_vec(), set0.clone()))
         .collect();
 
         let expected_index2: HashMap<_, _> = vec![
@@ -353,7 +359,7 @@ mod tests {
             "AAAAT", "AAAAC", "ANAAA",
         ]
         .iter()
-        .map(|i| (i.as_bytes().to_vec(), 0))
+        .map(|i| (i.as_bytes().to_vec(), set0.clone()))
         .collect();
 
         assert_eq!(sampledata.len(), 2);
@@ -371,6 +377,9 @@ mod tests {
         let sample_names = vec!["sample_1".to_string(), "sample_2".to_string()];
         let project_names = vec![Some("project_1".to_string()), Some("project_2".to_string())];
 
+        let set0: HashSet<usize> = [0].iter().cloned().collect();
+        let set1: HashSet<usize> = [1].iter().cloned().collect();
+
         let mut expected_index = HashMap::new();
 
         for ix in vec![
@@ -378,7 +387,7 @@ mod tests {
             "GCGGG", "GNGGG", "GGGNG", "GGGGA", "GGGGN", "GAGGG", "GGGTG", "GGGGG", "GGCGG",
             "CGGGG", "GTGGG", "GGGGT",
         ] {
-            expected_index.insert(ix.as_bytes().to_vec(), 0);
+            expected_index.insert(ix.as_bytes().to_vec(), set0.clone());
         }
 
         for ix in vec![
@@ -386,7 +395,7 @@ mod tests {
             "GTTTT", "TTTNT", "TNTTT", "TTTAT", "TTTCT", "TTTTA", "TTTTC", "TTTTG", "CTTTT",
             "TTTGT", "TTTTN", "TTATT",
         ] {
-            expected_index.insert(ix.as_bytes().to_vec(), 1);
+            expected_index.insert(ix.as_bytes().to_vec(), set1.clone());
         }
 
         let mut expected_index2 = HashMap::new();
@@ -396,7 +405,7 @@ mod tests {
             "AAAGA", "AGAAA", "GAAAA", "NAAAA", "ACAAA", "AANAA", "AAAAN", "AAAAT", "AAACA",
             "AAANA", "TAAAA", "AATAA",
         ] {
-            expected_index2.insert(ix2.as_bytes().to_vec(), 0);
+            expected_index2.insert(ix2.as_bytes().to_vec(), set0.clone());
         }
 
         for ix2 in vec![
@@ -404,7 +413,7 @@ mod tests {
             "CCCAC", "CCCCA", "CACCC", "GCCCC", "CCCCC", "CCCCT", "CTCCC", "CNCCC", "NCCCC",
             "CCCCG", "CCACC", "CCCCN",
         ] {
-            expected_index2.insert(ix2.as_bytes().to_vec(), 1);
+            expected_index2.insert(ix2.as_bytes().to_vec(), set1.clone());
         }
         let mut expected_sampledata = SampleData::new();
 
@@ -507,12 +516,15 @@ mod tests {
         let project_names = vec![Some("project_1".to_string()), Some("project_2".to_string())];
         let mut expected_index = HashMap::new();
 
+        let set0: HashSet<usize> = [0].iter().cloned().collect();
+        let set1: HashSet<usize> = [1].iter().cloned().collect();
+
         for ix in vec![
             "TGGGG", "GGTGG", "AGGGG", "GGGAG", "GGAGG", "GGGGC", "NGGGG", "GGGCG", "GGNGG",
             "GCGGG", "GNGGG", "GGGNG", "GGGGA", "GGGGN", "GAGGG", "GGGTG", "GGGGG", "GGCGG",
             "CGGGG", "GTGGG", "GGGGT",
         ] {
-            expected_index.insert(ix.as_bytes().to_vec(), 0);
+            expected_index.insert(ix.as_bytes().to_vec(), set0.clone());
         }
 
         for ix in vec![
@@ -520,7 +532,7 @@ mod tests {
             "GTTTT", "TTTNT", "TNTTT", "TTTAT", "TTTCT", "TTTTA", "TTTTC", "TTTTG", "CTTTT",
             "TTTGT", "TTTTN", "TTATT",
         ] {
-            expected_index.insert(ix.as_bytes().to_vec(), 1);
+            expected_index.insert(ix.as_bytes().to_vec(), set1.clone());
         }
 
         let index_vec = vec![b"GGGGG".to_vec(), b"TTTTT".to_vec()];
@@ -541,7 +553,7 @@ mod tests {
             .iter()
             .cloned()
             .enumerate()
-            .map(|(i, ix)| (ix, i))
+            .map(|(i, ix)| (ix, [i].iter().cloned().collect()))
             .collect();
 
         let actual_mapping =
