@@ -29,8 +29,7 @@ pub fn locs_decoder(locs_path: &Path) -> std::io::Result<Locs> {
 
     // do the bananas conversion to get the right coordinates
     let loc_buffer: Vec<_> = loc_buffer
-        .iter()
-        .cloned()
+        .drain(..)
         .map(|v| ((v as f64) * 10. + 1000.).round())
         .map(|v| v as u32)
         .collect();

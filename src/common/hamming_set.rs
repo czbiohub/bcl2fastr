@@ -1,20 +1,15 @@
 //! Functions for building hamming sets (all strings within a given distance of a seed)
 //! and checking for conflicts between them
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use rayon::prelude::*;
 
-/// makes a single-element HashSet from a vector of bytes
-pub fn singleton_set(index: &Vec<u8>) -> HashSet<Vec<u8>> {
-    [index.clone()].iter().cloned().collect::<HashSet<_>>()
-}
-
 /// given a set of indices, return a new set of indices which include everything
 /// within hamming distance 1
 pub fn hamming_set(index_set: &HashSet<Vec<u8>>) -> HashSet<Vec<u8>> {
-    let nucleotides = [b'A', b'C', b'G', b'T', b'N'];
+    const NUCLEOTIDES: [u8; 5] = [b'A', b'C', b'G', b'T', b'N'];
 
     let new_set: HashSet<_> = index_set
         .iter()
@@ -22,7 +17,7 @@ pub fn hamming_set(index_set: &HashSet<Vec<u8>>) -> HashSet<Vec<u8>> {
         .map(|index| {
             let mut this_set = HashSet::new();
             for i in 0..index.len() {
-                for c in nucleotides.iter().cloned() {
+                for c in NUCLEOTIDES.iter().cloned() {
                     let mut new_index = index.clone();
                     new_index[i] = c;
                     this_set.insert(new_index);
@@ -40,13 +35,11 @@ pub fn hamming_set(index_set: &HashSet<Vec<u8>>) -> HashSet<Vec<u8>> {
 /// two indices, then an overlap between one is allowed as long as the second index
 /// is sufficient to distinguish them.
 pub fn check_conflict(
-    sample_names: &[String],
-    index_sets: &[HashSet<Vec<u8>>],
-    index2_sets: &[HashSet<Vec<u8>>],
+    index_sets: &HashMap<String, HashSet<Vec<u8>>>,
+    index2_sets: &HashMap<String, HashSet<Vec<u8>>>,
 ) -> bool {
-    let sample_clash: HashSet<_> = sample_names
+    let sample_clash: HashSet<_> = index_sets
         .iter()
-        .zip(index_sets.iter())
         .tuple_combinations()
         .par_bridge()
         .filter_map(|((s1, hset1), (s2, hset2))| {
@@ -62,9 +55,8 @@ pub fn check_conflict(
         return sample_clash.len() > 0;
     }
 
-    let sample_clash2: HashSet<_> = sample_names
+    let sample_clash2: HashSet<_> = index2_sets
         .iter()
-        .zip(index2_sets.iter())
         .tuple_combinations()
         .par_bridge()
         .filter_map(|((s1, hset1), (s2, hset2))| {
@@ -82,12 +74,13 @@ pub fn check_conflict(
 #[cfg(test)]
 mod test {
     use super::*;
+    use maplit::{hashmap, hashset};
     use std::fs;
 
     #[test]
     fn singleton_set() {
         let index = b"ACTGCGAA".to_vec();
-        let index_set = super::singleton_set(&index);
+        let index_set = hashset! { index.clone() };
 
         assert_eq!(index_set.len(), 1);
         assert_eq!(index_set.get(&index), Some(&index));
@@ -95,7 +88,7 @@ mod test {
 
     #[test]
     fn hamming_set_distance_1() {
-        let initial_set = super::singleton_set(&b"ACTGCGAA".to_vec());
+        let initial_set = hashset! { b"ACTGCGAA".to_vec() };
         let actual_hammingset = hamming_set(&initial_set);
 
         let test_contents = fs::read_to_string("test_data/hamming_distance_1_test.txt").unwrap();
@@ -110,7 +103,7 @@ mod test {
 
     #[test]
     fn hamming_set_distance_2() {
-        let initial_set = super::singleton_set(&b"ACTGCGAA".to_vec());
+        let initial_set = hashset! { b"ACTGCGAA".to_vec() };
         let actual_hammingset = hamming_set(&hamming_set(&initial_set));
 
         let test_contents = fs::read_to_string("test_data/hamming_distance_2_test.txt").unwrap();
@@ -125,18 +118,26 @@ mod test {
 
     #[test]
     fn hamming_conflicts() {
-        let sample_names = vec!["sample_1".to_string(), "sample_2".to_string()];
+        let index1 = hashset! { b"ACTGCGAA".to_vec() };
+        let index2 = hashset! { b"ACTGCGAT".to_vec() };
+        let index3 = hashset! { b"ACTGCCTT".to_vec() };
 
-        let index1 = super::singleton_set(&b"ACTGCGAA".to_vec());
-        let index2 = super::singleton_set(&b"ACTGCGAT".to_vec());
-        let index3 = super::singleton_set(&b"ACTGCCTT".to_vec());
+        let hammingset1 = hashmap! {
+            "sample_1".to_string() => hamming_set(&index1),
+            "sample_2".to_string() => hamming_set(&index2),
+        };
+        let hammingset2 = hashmap! {
+            "sample_1".to_string() => hamming_set(&index2),
+            "sample_2".to_string() => hamming_set(&index3),
+        };
+        let hammingset3 = hashmap! {
+            "sample_1".to_string() => hamming_set(&index1),
+            "sample_2".to_string() => hamming_set(&index3),
+        };
+        let empty_hammingset = HashMap::new();
 
-        let hammingset1 = &[hamming_set(&index1), hamming_set(&index2)];
-        let hammingset2 = &[hamming_set(&index2), hamming_set(&index3)];
-        let hammingset3 = &[hamming_set(&index1), hamming_set(&index3)];
-
-        assert!(check_conflict(&sample_names, hammingset1, &[]));
-        assert!(check_conflict(&sample_names, hammingset2, &[]));
-        assert!(!check_conflict(&sample_names, hammingset3, &[]));
+        assert!(check_conflict(&hammingset1, &empty_hammingset));
+        assert!(check_conflict(&hammingset2, &empty_hammingset));
+        assert!(!check_conflict(&hammingset3, &empty_hammingset));
     }
 }
