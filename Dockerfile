@@ -1,4 +1,4 @@
-FROM rust:1.37
+FROM rust:1.46
 
 ARG dev=0
 

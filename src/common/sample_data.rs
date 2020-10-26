@@ -22,11 +22,19 @@ pub type SampleData = HashMap<usize, Samples>;
 /// If there is only one index, the index2 values will be empty.
 #[derive(Debug, PartialEq)]
 pub struct Samples {
+    /// vector of original sample names
     pub sample_names: Vec<String>,
+    /// project name for each sample, or None if project wasn't in sample sheet
     pub project_names: Vec<Option<String>>,
+    /// vector of exact indices for each sample, for reporting exact match numbers. Contains
+    /// a HashSet for each sample because a single sample can have multiple indices listed
     index_vec: Vec<HashSet<Vec<u8>>>,
+    /// map from all valid indices (up to error tolerance) to a usize which indexes into the
+    /// sample_names vector
     index_map: HashMap<Vec<u8>, HashSet<usize>>,
+    /// the same vector of index sets, but for the second index (if used)
     index2_vec: Vec<HashSet<Vec<u8>>>,
+    /// another map from valid index to sample usize, for the second index
     index2_map: HashMap<Vec<u8>, HashSet<usize>>,
 }
 
@@ -68,7 +76,9 @@ impl Samples {
     }
 
     /// helper function for when there are two indices. By construction any intersection will
-    /// either be empty or contain one usize element
+    /// either be empty or contain one usize element. This has a potential "bug" in that it will
+    /// say there's an exact match when the two indices match the same sample exactly but were not
+    /// specified as a pair in the sample sheet
     fn get_2index_sample(
         &self,
         idx: ArrayView1<u8>,

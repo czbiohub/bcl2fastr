@@ -18,7 +18,7 @@ use crate::sample_data::Samples;
 /// produce the correct filename format, depending on whether we are splitting lanes
 fn make_filename(
     output_path: &PathBuf,
-    sample_name: &String,
+    sample_name: &str,
     sample_project: &Option<String>,
     lane: usize,
     read_num: usize,
