@@ -239,7 +239,7 @@ pub fn read_samplesheet(samplesheet: PathBuf, max_distance: usize) -> std::io::R
         .records()
         .filter_map(|r| match r {
             Ok(r) => Some(r),
-            Err(e) => panic!("{}", e),
+            Err(e) => panic!("Error reading samplesheet: {}", e),
         })
         .skip_while(|r| &r[0] != "[Data]")
         .collect();
@@ -261,12 +261,16 @@ pub fn read_samplesheet(samplesheet: PathBuf, max_distance: usize) -> std::io::R
     // collect samples per-lane (or in one big lane if there is no lane column)
     let mut lanes = HashMap::new();
 
-    for record in rows[2..]
+    for (i, record) in rows[2..]
         .iter()
         .map(|r| rows[1].iter().zip(r.iter()).collect::<HashMap<_, _>>())
+        .enumerate()
     {
         let lane: usize = match record.get(&"Lane") {
-            Some(lane) => lane.parse().unwrap(),
+            Some(lane) => match lane.parse() {
+                Ok(lane_i) => lane_i,
+                Err(_) => panic!("Invalid value for lane on row {}: {}", i + 1, lane),
+            },
             None => 0,
         };
 
@@ -283,7 +287,7 @@ pub fn read_samplesheet(samplesheet: PathBuf, max_distance: usize) -> std::io::R
         }
         match record.get(&"Index") {
             Some(&idx) if idx.len() > 0 => sample_idx.push(idx.as_bytes().to_vec()),
-            Some(_) | None => (),
+            Some(_) | None => warn!("Missing index on row {}", i + 1),
         }
         match record.get(&"Index2") {
             Some(&idx2) if idx2.len() > 0 => sample_idx2.push(idx2.as_bytes().to_vec()),
