@@ -246,16 +246,16 @@ pub fn read_samplesheet(samplesheet: PathBuf, max_distance: usize) -> std::io::R
 
     assert!(rows.len() > 2, "No samples found in samplesheet");
 
-    // check for required columns before we start processing
-    {
-        let row_set: Vec<_> = rows[1].iter().collect();
-        if !row_set.contains(&"Sample_Name") {
-            panic!("Samplesheet does not have a Sample_Name column")
-        }
+    let header_row: Vec<_> = rows[1].iter().map(|s| s.to_lowercase()).collect();
+    let header_row: Vec<_> = header_row.iter().map(|s| s.as_str()).collect();
 
-        if !row_set.contains(&"Index") {
-            panic!("Samplesheet does not have an Index column")
-        }
+    // check for required columns before we start processing
+    if !header_row.contains(&"sample_name") {
+        panic!("Samplesheet does not have a Sample_Name column")
+    }
+
+    if !header_row.contains(&"index") {
+        panic!("Samplesheet does not have an Index column")
     }
 
     // collect samples per-lane (or in one big lane if there is no lane column)
@@ -263,10 +263,10 @@ pub fn read_samplesheet(samplesheet: PathBuf, max_distance: usize) -> std::io::R
 
     for (i, record) in rows[2..]
         .iter()
-        .map(|r| rows[1].iter().zip(r.iter()).collect::<HashMap<_, _>>())
+        .map(|r| header_row.iter().zip(r.iter()).collect::<HashMap<_, _>>())
         .enumerate()
     {
-        let lane: usize = match record.get(&"Lane") {
+        let lane: usize = match record.get(&"lane") {
             Some(lane) => match lane.parse() {
                 Ok(lane_i) => lane_i,
                 Err(_) => panic!("Invalid value for lane on row {}: {}", i + 1, lane),
@@ -278,18 +278,18 @@ pub fn read_samplesheet(samplesheet: PathBuf, max_distance: usize) -> std::io::R
             .entry(lane)
             .or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
 
-        sample_names.push(record.get(&"Sample_Name").unwrap().to_string());
-        match record.get(&"Sample_Project") {
+        sample_names.push(record.get(&"sample_name").unwrap().to_string());
+        match record.get(&"sample_project") {
             Some(&project_name) if project_name.len() > 0 => {
                 project_names.push(Some(project_name.to_string()))
             }
             Some(_) | None => project_names.push(None),
         }
-        match record.get(&"Index") {
+        match record.get(&"index") {
             Some(&idx) if idx.len() > 0 => sample_idx.push(idx.as_bytes().to_vec()),
             Some(_) | None => warn!("Missing index on row {}", i + 1),
         }
-        match record.get(&"Index2") {
+        match record.get(&"index2") {
             Some(&idx2) if idx2.len() > 0 => sample_idx2.push(idx2.as_bytes().to_vec()),
             Some(_) | None => (),
         }
